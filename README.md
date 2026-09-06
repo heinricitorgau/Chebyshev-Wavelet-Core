@@ -27,6 +27,7 @@ This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from
 - [Application Module: Causal Feature Extraction](#application-module-causal-feature-extraction-wavelet_features)
 - [Application Module: Prediction & Walk-Forward Backtesting](#application-module-prediction--walk-forward-backtesting-walkforward_backtest)
 - [Application Module: Cross-Sectional Long-Short Backtesting](#application-module-cross-sectional-long-short-backtesting-cross_sectional_backtest)
+- [Real Data: FX](#real-data-fx-load_fx_data)
 - [Project Structure](#project-structure)
 - [Citation](#citation)
 - [License](#license)
@@ -634,6 +635,72 @@ The projection operator and each fold's $X^TX$ are unchanged under permutation, 
 
 ---
 
+## Real Data: FX `load_fx_data`
+
+Everything above uses synthetic data. This module connects the pipeline to a real market: **European Central Bank daily reference rates**, via the [Frankfurter API](https://api.frankfurter.dev) (free, no API key, no rate limit, coverage from 1999-01-04). Data is cached locally after the first fetch.
+
+```matlab
+[S, T, names] = load_fx_data();               % 7086 days x 9 G10 currencies
+F   = wavelet_features(S, T, 'Windows', [21 63 252]);
+res = cross_sectional_backtest(F, S, 'NullRuns', 200, 'CostBps', 2, ...
+                               'MinAssets', 6, 'Quantile', 1/3);
+```
+
+### Numeraire Conversion (the module's core design)
+
+The ECB publishes only EUR-based rates. Laying those series side by side for cross-sectional analysis would mean every series shares the EUR leg, so the ranking would be dominated by EUR strength. This module therefore converts to a single numeraire (USD by default):
+
+$$S_X(t) = \frac{\text{(numeraire per EUR)}(t)}{\text{(X per EUR)}(t)}$$
+
+i.e. the value of one unit of currency $X$. Verified against the ECB source rates with **0.000e+00** conversion error for EURUSD, USDJPY, and GBPUSD.
+
+After conversion the shared component becomes the *dollar* factor: the measured average off-diagonal correlation of daily returns is **0.512**. `cross_sectional_backtest`'s cross-sectional demeaning removes exactly this common component, leaving relative currency strength — which is precisely the input the cross-sectional module needs.
+
+### Two Things You Must Know Before Using It
+
+**Spot rates are not total returns.** FX total return = spot change + interest-rate differential (carry). ECB reference rates contain **no carry**. For FX, carry is often the dominant component and can drive the entire P&L of a long-short strategy. Any Sharpe computed here is a *spot-only* figure, not an achievable trading return. To evaluate a tradeable strategy you must add short-rate differentials (e.g. OIS) for each currency.
+
+**These are fixing prices, not tradeable quotes.** ECB reference rates are set around 16:00 CET; they are not close prices and carry no bid-ask information. Real execution costs must be added via `'CostBps'`.
+
+### Measured Result: No Tradeable Signal Found
+
+Full sample, 6334 out-of-sample days, 200 null runs:
+
+| Metric | 0 bps | 2 bps |
+|---|---|---|
+| Mean rank IC | −0.0003 (ICIR −0.00, t = −0.06, p = 0.512) | same |
+| Sharpe | −0.15 (p = 0.796) | **−0.94** (p = 0.557) |
+| IC hit rate | 0.495 | 0.495 |
+| Turnover | 1.03 / day | 1.03 / day |
+| Equal-weight G10 basket | Sharpe +0.16 | — |
+
+![Real FX result](figures/fig_fx_real.png)
+
+*Top-left: the nine G10 currencies valued in USD. Top-right: the strategy loses steadily while the passive basket does not. Bottom-left: the observed IC sits squarely inside the null distribution. Bottom-right: 252-day rolling IC swings between −0.25 and +0.22 and is positive only 46.3% of the time — no stable signal.*
+
+Single-currency timing agrees: EUR/JPY/GBP accuracies were 0.5093 / 0.5044 / 0.4976, all with non-significant p-values — consistent with the power analysis, which predicted that real FX autocorrelation is too weak to detect at this sample size.
+
+Note also that turnover of 1.03/day means the portfolio is rebuilt almost completely every day, costing about **5.2% per year at 2 bps**. That alone would erase any signal of realistic magnitude.
+
+### A Sub-Period Result That Looks Significant — and Why It Is Not
+
+Splitting the sample in half produced this:
+
+| Period | IC | p(IC) | Sharpe | p(Sharpe) |
+|---|---|---|---|---|
+| 1999–2012 | −0.0020 | 0.616 | −0.94 | 0.636 |
+| 2013–2026 | **+0.0123** | **0.026** | −0.82 | 0.291 |
+
+A p-value of 0.026 looks like a discovery. It is not, for three independent reasons:
+
+1. **Multiple comparisons.** Two sub-periods were tested, so the Bonferroni-adjusted threshold is 0.025 — this fails even that minimal correction.
+2. **The documented calibration.** As measured in the [null-test calibration](#null-test-calibration-please-read), this module's IC p-value has a mildly heavy left tail: `P(p<0.05)` ≈ 0.10, roughly twice nominal. A nominal 0.026 therefore corresponds to something closer to 0.05 in truth.
+3. **Internal inconsistency.** The IC is positive while the Sharpe over the same period is **negative** (−0.82, p = 0.291). A ranking that is "correct" yet loses money is not a tradeable signal. This repo's own stated rule — require both the IC and Sharpe p-values to be significant — rejects it.
+
+This is exactly the kind of false positive the guardrails were built to catch, which is why it is documented rather than reported as a finding.
+
+---
+
 ## Project Structure
 
 ```
@@ -650,7 +717,8 @@ chebyshev_wavelet_core/
 │                                %   walk-forward backtesting
 ├── cross_sectional_backtest.m   % Application Module 4: cross-sectional
 │                                %   long-short backtesting
-├── demo_omi_pom.m               % Demo script (11 sections, see below)
+├── load_fx_data.m               % Real data: ECB daily FX reference rates
+├── demo_omi_pom.m               % Demo script (12 sections, see below)
 ├── figures/                     % Figures for README (generated by demo script)
 │   ├── fig_basis.png
 │   ├── fig_structure.png
@@ -660,7 +728,8 @@ chebyshev_wavelet_core/
 │   ├── fig_denoise.png
 │   ├── fig_causal.png
 │   ├── fig_backtest.png
-│   └── fig_crosssection.png
+│   ├── fig_crosssection.png
+│   └── fig_fx_real.png
 ├── README.md                    % English
 ├── README_TW.md                 % Traditional Chinese
 └── LICENSE
@@ -687,6 +756,7 @@ demo_omi_pom      % Run in full, or execute section-by-section with Ctrl+Enter
 | 9 | Causal feature extraction and look-ahead bias quantification (`wavelet_features`), 20 random experiments |
 | 10 | Prediction model and walk-forward backtesting (`walkforward_backtest`), with null distribution |
 | 11 | Cross-sectional long-short backtesting (`cross_sectional_backtest`), signal strength sweep |
+| 12 | Real FX data (`load_fx_data`) — skipped automatically if no cache exists, keeping the demo runnable offline |
 
 ## Citation
 

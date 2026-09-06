@@ -1,6 +1,6 @@
 %% DEMO_OMI_POM  第二類 Chebyshev 小波運算矩陣示範腳本
 %
-%   本腳本示範本套件的完整用法，共十一個章節：
+%   本腳本示範本套件的完整用法，共十二個章節：
 %
 %     1. 建構 OMI 並與論文 Eq.(4.9) 逐項比對
 %     2. 小波基底函數視覺化
@@ -13,6 +13,7 @@
 %     9. 因果特徵萃取與前視偏誤量化 (wavelet_features)
 %    10. 預測模型與 walk-forward 回測 (walkforward_backtest)
 %    11. 橫斷面多空策略 (cross_sectional_backtest)
+%    12. 真實外匯資料：ECB G10 每日參考匯率 (load_fx_data)
 %
 %   於 MATLAB 編輯器中可用 Ctrl+Enter 逐節執行；亦可直接
 %       >> demo_omi_pom
@@ -688,6 +689,47 @@ if SHOW_PLOTS
 end
 
 
+%% 12. 真實外匯資料 ========================================================
+% 前十一節皆為合成資料。本節套用至真實市場：歐洲央行 G10 每日參考匯率。
+%
+% 本節需要 load_fx_data 的快取；若尚未建立（第一次需連網），本節會自動
+% 略過，以維持整份示範腳本在離線環境下的可重現性。
+fprintf('\n【12】真實外匯資料：ECB G10 每日參考匯率\n');
+
+fxCache = fullfile('data', 'fx_ecb_cache.mat');
+if ~isfile(fxCache)
+    fprintf(['  略過：尚未建立資料快取。請先在可連網時執行一次\n' ...
+             '      >> load_fx_data\n' ...
+             '  取得資料後（約 12 秒），再重新執行本示範腳本即可。\n']);
+else
+    [fxS, fxT, fxNames, fxInfo] = load_fx_data('Offline', true);
+    fprintf('  %d 個交易日 x %d 種貨幣（%s .. %s），計價幣 %s\n', ...
+        fxInfo.nObs, fxInfo.nCurrencies, ...
+        string(fxInfo.dateRange(1), 'yyyy-MM-dd'), ...
+        string(fxInfo.dateRange(2), 'yyyy-MM-dd'), fxInfo.numeraire);
+
+    fxRet = diff(log(fxS));
+    cm    = corrcoef(fxRet);
+    fprintf('  日報酬相關矩陣平均非對角元 = %.3f（美元共同因子）\n', ...
+        (sum(cm, 'all') - numel(fxNames)) / (numel(fxNames)^2 - numel(fxNames)));
+
+    fxF = wavelet_features(fxS, fxT, 'Windows', [21 63 252]);
+    % G10 去除計價幣僅 9 種貨幣，故放寬 MinAssets、並改為每邊 3 檔
+    fxRes = cross_sectional_backtest(fxF, fxS, 'NullRuns', 100, 'CostBps', 2, ...
+        'MinAssets', 6, 'Quantile', 1/3);
+
+    fprintf('  IC %+.4f (ICIR %+.2f, p = %.3f) | Sharpe %+.2f (p = %.3f)\n', ...
+        fxRes.meanIC, fxRes.icir, fxRes.null.pIC, fxRes.sharpe, fxRes.null.pSharpe);
+    fprintf('  IC 勝率 %.3f | 周轉 %.2f/日（2 bps 下年化成本約 %.1f%%）\n', ...
+        fxRes.icHitRate, fxRes.turnover, 100*fxRes.turnover*2/1e4*252);
+    fprintf('  等權 G10 籃子買進持有 Sharpe %+.2f\n', ...
+        fxRes.baseline.equalWeightBuyHold.sharpe);
+    fprintf(['  => 真實外匯上未偵測到可交易訊號，此為預期且誠實的結果。\n' ...
+             '     注意：ECB 參考匯率為純即期價格，不含利差(carry)；外匯\n' ...
+             '     的總報酬 = 即期變動 + 利差，故此處損益不等於可實現報酬。\n']);
+end
+
+
 fprintf('\n===============================================================\n');
 fprintf(' 示範結束。詳細 API 說明請執行：\n');
 fprintf('   help build_chebyshev_matrices\n');
@@ -695,6 +737,7 @@ fprintf('   help wavelet_denoise_series\n');
 fprintf('   help wavelet_features\n');
 fprintf('   help walkforward_backtest\n');
 fprintf('   help cross_sectional_backtest\n');
+fprintf('   help load_fx_data\n');
 fprintf('===============================================================\n');
 
 

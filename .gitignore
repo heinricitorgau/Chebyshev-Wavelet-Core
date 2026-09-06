@@ -17,3 +17,6 @@ codegen/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Fetched market data (not version-controlled)
+data/
