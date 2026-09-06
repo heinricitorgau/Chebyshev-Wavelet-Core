@@ -24,6 +24,7 @@ This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from
 - [Application Module: Financial Time-Series Denoising](#application-module-financial-time-series-denoising-wavelet_denoise_series)
 - [Application Module: Causal Feature Extraction](#application-module-causal-feature-extraction-wavelet_features)
 - [Application Module: Prediction & Walk-Forward Backtesting](#application-module-prediction--walk-forward-backtesting-walkforward_backtest)
+- [Application Module: Cross-Sectional Long-Short Backtesting](#application-module-cross-sectional-long-short-backtesting-cross_sectional_backtest)
 - [Project Structure](#project-structure)
 - [Citation](#citation)
 - [License](#license)
@@ -566,6 +567,71 @@ This is a statistical limitation at this sample size for a single series, not an
 
 ---
 
+## Application Module: Cross-Sectional Long-Short Backtesting `cross_sectional_backtest`
+
+The fourth step in the pipeline, addressing directly the limitation identified by the power analysis in step three.
+
+```matlab
+F   = wavelet_features(S, T);                 % S is an nObs x nAssets price matrix
+res = cross_sectional_backtest(F, S, 'NullRuns', 200, 'CostBps', 5);
+fprintf('IC %.4f (ICIR %.2f, p = %.3f) | Sharpe %.2f\n', ...
+    res.meanIC, res.icir, res.null.pIC, res.sharpe);
+```
+
+### Why Cross-Sectional Breaks the Single-Series Limit
+
+The power analysis of `walkforward_backtest` showed that a single series at $n=2500$ requires $\phi \approx 0.20$ to be detectable, while real stocks exhibit only 0.00–0.05. The cross-sectional approach improves this on two fronts:
+
+1. **Sample size**: each date contributes $n_{\text{assets}}$ samples, so training samples grow from $O(T)$ to $O(T \times n_{\text{assets}})$ (measured: 200 assets × 2000 periods yields 348k samples), shrinking the standard error by roughly $\sqrt{n_{\text{assets}}}$.
+2. **Removing the common factor**: cross-sectional standardization subtracts the day's market component. Single-series timing must predict market direction (very hard); the cross-sectional approach only needs to predict **relative ranking**.
+
+**Head-to-head comparison on identical data** (120 assets with an injected $\kappa=0.05$ cross-sectional reversal signal):
+
+| Method | Metrics | p-value |
+|---|---|---|
+| **Cross-sectional long-short** | IC +0.0947, Sharpe 14.38 | **0.010** |
+| Single-series timing (6-asset average) | Accuracy 0.5165, Sharpe 0.54 | 0.109 (not significant) |
+| Equal-weight buy-and-hold | Sharpe 0.38 | — |
+
+The same signal is detected cross-sectionally but missed by single-series timing.
+
+![Cross-sectional](figures/fig_crosssection.png)
+
+*Left: long-short equity far exceeds equal-weight buy-and-hold. Right: distribution of daily rank IC, mean 0.097 with a 0.84 hit rate.*
+
+> **These Sharpe figures must not be taken as live-trading expectations.** This section uses entirely synthetic data with an injected signal far stronger than real markets, and excludes borrowing costs, liquidity, and market impact. Their only purpose is to demonstrate that the framework detects what it should detect. In practice, a monthly IC of 0.02–0.05 already constitutes a usable signal.
+
+### Causality and Method
+
+- **Target**: next-period return, cross-sectionally demeaned and divided by that day's cross-sectional standard deviation, so that all dates are on a comparable scale.
+- **Feature standardization**: performed *within each date, across assets* (`rank` or `zscore`). This uses only same-day data and involves **no time-series statistics, so it introduces no look-ahead bias** — although it uses information from other assets, all of that information is known at the time.
+- **Model**: ridge regression on pooled (asset, time) samples, with train/test split by time.
+- **Evaluation**: primarily the information coefficient (IC), the rank correlation between predicted scores and realized relative returns; its advantage is independence from portfolio construction. ICIR, IC t-statistic, and hit rate are also reported.
+
+Leakage check: after perturbing data *after* the test segment, the maximum change in prior prediction scores was **0.000e+00 across 56,040 entries**.
+
+### Null-Test Calibration (Please Read)
+
+Verified on synthetic panels with *no* cross-sectional signal (where p-values should theoretically be uniform), 50 replications × 100 null samples:
+
+| | `P(p<0.05)` | `P(p<0.10)` | `P(p<0.20)` | KS | Mean |
+|---|---|---|---|---|---|
+| Nominal | 0.05 | 0.10 | 0.20 | — | 0.50 |
+| `date` IC | 0.080 | 0.140 | 0.200 | 0.097 | 0.472 |
+| `date` Sharpe | 0.040 | 0.160 | 0.220 | 0.073 | 0.486 |
+| `asset` IC | 0.100 | 0.140 | 0.200 | 0.087 | 0.475 |
+| `asset` Sharpe | 0.040 | 0.120 | 0.280 | 0.102 | 0.479 |
+
+Observed IC was $+0.00031 \pm 0.00062$ — effectively zero, confirming no fabricated signal. The overall distribution is close to uniform (all KS statistics pass against the 0.192 critical value; mean p ≈ 0.48), **but the extreme left tail of the IC p-value is mildly heavy**: pooling an additional independent set of 30 replications (80 no-signal panels in total), the IC `P(p<0.05)` is approximately 0.10, twice the nominal rate (about 2 standard errors); the Sharpe figure remains within noise.
+
+**Recommendation: treat an IC p-value near 0.05 as marginal rather than conclusive.** Use a stricter threshold (e.g. 0.01), or require both the IC and Sharpe p-values to be significant. Three rounds of investigation (including switching to the global asset permutation `'asset'` mode) found the calibration difference between the two modes to be within the standard error, and identified no correctable mechanism — hence this is disclosed rather than hidden.
+
+### Performance
+
+The projection operator and each fold's $X^TX$ are unchanged under permutation, so the Cholesky factorization is computed once and reused; tied ranking and within-date permutation are both vectorized. Measured on 200 assets × 2000 periods × 18 features (idle machine): 1.4 s per backtest, and about 0.74 s per null run (roughly 2.5 minutes for 200 runs). Null-run cost scales with the number of assets and test dates, and is sensitive to CPU contention — the same measurement taken while another MATLAB process was running gave 1.67 s.
+
+---
+
 ## Project Structure
 
 ```
@@ -580,7 +646,9 @@ chebyshev_wavelet_core/
 │                                %   (for prediction models)
 ├── walkforward_backtest.m       % Application Module 3: prediction model and
 │                                %   walk-forward backtesting
-├── demo_omi_pom.m               % Demo script (10 sections, see below)
+├── cross_sectional_backtest.m   % Application Module 4: cross-sectional
+│                                %   long-short backtesting
+├── demo_omi_pom.m               % Demo script (11 sections, see below)
 ├── figures/                     % Figures for README (generated by demo script)
 │   ├── fig_basis.png
 │   ├── fig_structure.png
@@ -589,7 +657,8 @@ chebyshev_wavelet_core/
 │   ├── fig_varcoef.png
 │   ├── fig_denoise.png
 │   ├── fig_causal.png
-│   └── fig_backtest.png
+│   ├── fig_backtest.png
+│   └── fig_crosssection.png
 ├── README.md
 └── LICENSE
 ```
@@ -614,6 +683,7 @@ demo_omi_pom      % Run in full, or execute section-by-section with Ctrl+Enter
 | 8 | Financial time-series denoising and trend features (`wavelet_denoise_series`), with $k$ parameter sweep |
 | 9 | Causal feature extraction and look-ahead bias quantification (`wavelet_features`), 20 random experiments |
 | 10 | Prediction model and walk-forward backtesting (`walkforward_backtest`), with null distribution |
+| 11 | Cross-sectional long-short backtesting (`cross_sectional_backtest`), signal strength sweep |
 
 ## Citation
 

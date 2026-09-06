@@ -1,6 +1,6 @@
 %% DEMO_OMI_POM  第二類 Chebyshev 小波運算矩陣示範腳本
 %
-%   本腳本示範本套件的完整用法，共十個章節：
+%   本腳本示範本套件的完整用法，共十一個章節：
 %
 %     1. 建構 OMI 並與論文 Eq.(4.9) 逐項比對
 %     2. 小波基底函數視覺化
@@ -12,6 +12,7 @@
 %     8. 應用：金融時間序列去噪與趨勢特徵 (wavelet_denoise_series)
 %     9. 因果特徵萃取與前視偏誤量化 (wavelet_features)
 %    10. 預測模型與 walk-forward 回測 (walkforward_backtest)
+%    11. 橫斷面多空策略 (cross_sectional_backtest)
 %
 %   於 MATLAB 編輯器中可用 Ctrl+Enter 逐節執行；亦可直接
 %       >> demo_omi_pom
@@ -607,12 +608,93 @@ if SHOW_PLOTS
 end
 
 
+%% 11. 橫斷面多空策略 ======================================================
+% 第 10 節的偵測力分析指出：單一序列在真實訊號強度下偵測不到。橫斷面透過
+% (a) 樣本數增為 T x nAssets、(b) 移除當日市場成分，突破此限制。
+fprintf('\n【11】橫斷面多空回測 (cross_sectional_backtest)\n');
+
+nXO = 1200;  nXA = 100;  tX = (1:nXO).';
+wSt = warning('off', 'wavelet_denoise_series:blockJump');
+cleanupX = onCleanup(@() warning(wSt));
+
+fprintf('  %-10s %-10s %-8s %-9s %-10s %s\n', ...
+    'kappa', 'IC', 'ICIR', 'p(IC)', 'Sharpe', '說明');
+icAll = zeros(3,1);  shAll = zeros(3,1);
+kapList = [0 0.02 0.05];
+for kk = 1:numel(kapList)
+    pxX = local_make_panel(nXO, nXA, kapList(kk), 500 + kk);
+    Fx  = wavelet_features(pxX, tX, 'Windows', [21 63]);
+    rx  = cross_sectional_backtest(Fx, pxX, 'NullRuns', 100, 'CostBps', 5);
+    icAll(kk) = rx.meanIC;  shAll(kk) = rx.sharpe;
+    if kapList(kk) == 0
+        note = '無訊號 -> 應不顯著';
+    else
+        note = '有訊號 -> 應顯著';
+    end
+    fprintf('  %-10.2f %+-10.4f %+-8.2f %-9.3f %+-10.2f %s\n', ...
+        kapList(kk), rx.meanIC, rx.icir, rx.null.pIC, rx.sharpe, note);
+end
+
+% 同一份資料上，橫斷面與單一序列擇時的正面比較
+pxX = local_make_panel(nXO, nXA, 0.05, 777);
+Fx  = wavelet_features(pxX, tX, 'Windows', [21 63]);
+rx  = cross_sectional_backtest(Fx, pxX, 'NullRuns', 100);
+accS = zeros(5,1);  shS = zeros(5,1);
+for j = 1:5
+    Fj = wavelet_features(pxX(:,j), tX, 'Windows', [21 63]);
+    rj = walkforward_backtest(Fj, pxX(:,j), 'NullRuns', 100);
+    accS(j) = rj.accuracy;  shS(j) = rj.sharpe;
+end
+fprintf('\n  同一份資料（kappa = 0.05）：\n');
+fprintf('    橫斷面多空     : IC %+.4f | Sharpe %+.2f | p(IC) %.3f\n', ...
+    rx.meanIC, rx.sharpe, rx.null.pIC);
+fprintf('    單一序列擇時   : 準確率 %.4f | Sharpe %+.2f （5 檔平均）\n', ...
+    mean(accS), mean(shS));
+fprintf('    等權買進持有   : Sharpe %+.2f\n', ...
+    rx.baseline.equalWeightBuyHold.sharpe);
+fprintf(['  => 同一個訊號，橫斷面偵測得到，單一序列擇時偵測不到。\n' ...
+         '     注意：本節為合成資料且注入的訊號遠強於真實市場，Sharpe\n' ...
+         '     數值不可作為實盤預期；其意義僅在於「框架能偵測到它該\n' ...
+         '     偵測到的東西」。\n']);
+
+if SHOW_PLOTS
+    figXs = figure('Name', 'Cross-sectional', 'Color', 'w', ...
+        'Position', [90 90 960 420]);
+    subplot(1,2,1);
+    plot(tX, rx.equity, '-', 'Color', [.15 .45 .75], 'LineWidth', 1.8);
+    hold on; grid on; box on;
+    plot(tX, rx.baseline.equalWeightBuyHold.equity, '-', ...
+        'Color', [.6 .6 .6], 'LineWidth', 1.4);
+    legend({'cross-sectional long-short', 'equal-weight buy \& hold'}, ...
+        'Interpreter', 'latex', 'Location', 'northwest', 'FontSize', 10);
+    xlabel('$t$', 'Interpreter', 'latex'); ylabel('equity');
+    title(sprintf('Long-short equity (IC %.3f, Sharpe %.1f)', ...
+        rx.meanIC, rx.sharpe), 'Interpreter', 'latex', 'FontSize', 12);
+    set(gca, 'FontSize', 10);
+
+    subplot(1,2,2);
+    icv = rx.ic(isfinite(rx.ic));
+    histogram(icv, 25, 'FaceColor', [.45 .6 .8], 'EdgeColor', 'none');
+    hold on; grid on; box on;
+    xline(0, 'k-', 'LineWidth', 1.2);
+    xline(mean(icv), 'r-', 'LineWidth', 2);
+    xlabel('daily rank IC'); ylabel('count');
+    legend({'IC distribution', 'zero', 'mean IC'}, 'Location', 'northwest', ...
+        'FontSize', 9);
+    title(sprintf('Daily IC: mean %.3f, hit rate %.2f', ...
+        mean(icv), mean(icv > 0)), 'Interpreter', 'latex', 'FontSize', 12);
+    set(gca, 'FontSize', 10);
+    export_png(figXs, 'fig_crosssection', EXPORT_PNG, FIG_DIR);
+end
+
+
 fprintf('\n===============================================================\n');
 fprintf(' 示範結束。詳細 API 說明請執行：\n');
 fprintf('   help build_chebyshev_matrices\n');
 fprintf('   help wavelet_denoise_series\n');
 fprintf('   help wavelet_features\n');
 fprintf('   help walkforward_backtest\n');
+fprintf('   help cross_sectional_backtest\n');
 fprintf('===============================================================\n');
 
 
@@ -628,6 +710,26 @@ end
 fpath = fullfile(figDir, [name '.png']);
 exportgraphics(figHandle, fpath, 'Resolution', 150, 'BackgroundColor', 'white');
 fprintf('  已輸出圖檔 : %s\n', fpath);
+end
+
+
+function S = local_make_panel(nObs, nAssets, kappa, seed)
+%LOCAL_MAKE_PANEL 合成多標的面板：市場因子 + 個股雜訊 + 可控的橫斷面反轉
+%   kappa = 0 表示完全沒有橫斷面可預測性；kappa > 0 時，相對自身移動平均
+%   偏離越大的標的，次期報酬越傾向反轉（即橫斷面均值回歸）。
+rng(seed);
+beta = 0.6 + 0.8*rand(1, nAssets);           % 各標的的市場敏感度
+sigI = 0.010 + 0.008*rand(1, nAssets);       % 各標的的特異波動
+rm   = 0.0003 + 0.009*randn(nObs, 1);        % 市場因子
+S    = zeros(nObs, nAssets);
+S(1,:) = 100;
+ma     = S(1,:);
+for t = 2:nObs
+    dev = (S(t-1,:) - ma) ./ max(ma, eps);
+    dev = dev - mean(dev);                   % 只保留橫斷面成分
+    S(t,:) = S(t-1,:) .* (1 + beta.*rm(t) + sigI.*randn(1,nAssets) - kappa*dev);
+    ma = 0.95*ma + 0.05*S(t,:);              % 指數移動平均
+end
 end
 
 
