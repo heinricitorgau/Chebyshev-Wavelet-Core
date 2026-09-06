@@ -8,6 +8,8 @@
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![GPU](https://img.shields.io/badge/GPU-gpuArray%20optional-76b900)
 
+[English](README.md) | **繁體中文**
+
 本模組將論文中以 $k=3,\ M=4$ 手算列出的 $16\times16$ 矩陣，推廣為**任意解析度 $k$ 與任意多項式階數 $M$ 的通式實作**，並通過與原論文 Eq.(4.9) 的逐項比對（誤差為 0）。
 
 ---
@@ -656,7 +658,8 @@ chebyshev_wavelet_core/
 │   ├── fig_causal.png
 │   ├── fig_backtest.png
 │   └── fig_crosssection.png
-├── README.md
+├── README.md                    % 英文
+├── README_TW.md                 % 繁體中文
 └── LICENSE
 ```
 

@@ -6,6 +6,8 @@
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![GPU](https://img.shields.io/badge/GPU-gpuArray%20optional-76b900)
 
+**English** | [繁體中文](README_TW.md)
+
 This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from the reference paper into a **fully general implementation for arbitrary resolution $k$ and polynomial order $M$**, verified element-wise against the paper's Eq. (4.9) with zero error.
 
 ---
@@ -659,7 +661,8 @@ chebyshev_wavelet_core/
 │   ├── fig_causal.png
 │   ├── fig_backtest.png
 │   └── fig_crosssection.png
-├── README.md
+├── README.md                    % English
+├── README_TW.md                 % Traditional Chinese
 └── LICENSE
 ```
 
