@@ -740,6 +740,57 @@ The 2014–2026 total-return sub-period gives Sharpe = −0.44 with **p = 0.040*
 
 A small p-value means "better than random", not "profitable". When costs are high enough to push the null negative, the two are very different claims.
 
+### Carry as a Feature: Does the Wavelet Add Anything on Top of a Known Factor?
+
+The natural follow-up is to feed carry into the model as a feature rather than treating it as a separate benchmark. No code change is needed — the feature array is `nObs × nFeat × nAssets`, so the carry differential simply concatenates along dimension 2:
+
+```matlab
+Fw    = wavelet_features(S, T, 'Windows', [21 63 252]);   % 18 wavelet features
+Fc    = reshape(carryDiff, nObs, 1, nAssets);             % 1 carry feature
+Fboth = cat(2, Fw, Fc);                                   % 19 features
+```
+
+Running all three configurations answers a precise question: subtracting "carry only" from "carry + wavelet" isolates the *incremental* value of the wavelet features.
+
+| Configuration | Sharpe | IC | p(IC) | maxDD | Skew | Turnover |
+|---|---|---|---|---|---|---|
+| **Carry only** (1 feature) | **+0.27** | +0.0397 | 0.005 | 0.304 | −0.63 | 0.004 |
+| Wavelet only (18 features) | −0.65 | +0.0051 | 0.144 | 0.653 | −0.28 | 0.926 |
+| Carry + wavelet (19 features) | −0.18 | +0.0279 | 0.005 | 0.464 | −0.65 | 0.491 |
+
+**Adding the wavelet features to carry destroys it**: Sharpe falls from +0.27 to −0.18. The 18 noise features dilute the single informative one and drive turnover up 123× (0.004 → 0.491), raising annual cost from 0.02% to about 2.5%.
+
+Sub-period consistency tells the same story — only carry survives in both halves:
+
+| Configuration | 2002–2013 | 2014–2026 |
+|---|---|---|
+| Carry only | +0.31 | +0.34 |
+| Wavelet only | −0.65 | −0.44 |
+| Carry + wavelet | −0.32 | −0.12 |
+
+Note also that carry + wavelet has a *significant* IC (p = 0.005) and even a significant Sharpe p-value, yet loses money — the same cost-laden-null trap described above.
+
+### But Carry Alone Is Not a "Stable" Strategy Either
+
+Judged as an investment rather than as a signal, the carry-only strategy fails on every stability dimension:
+
+| Metric | Carry-only strategy |
+|---|---|
+| Annualised return | **+2.2%** |
+| Annualised volatility | 8.1% |
+| Sharpe | 0.27 |
+| Max drawdown | **30.4%** (2007-07 → 2009-01) |
+| Time to recover the drawdown | **4.0 years** (1010 trading days) |
+| Worst calendar year | **−21.8%** (2008) |
+| Positive years | 15 of 23 (65%) |
+| Return skewness | −0.63 |
+
+The decisive problem is *when* it loses. During the 2008 crisis it lost −14.4% while the passive equal-weight G10 basket lost −14.8% — **essentially no diversification benefit exactly when it was needed**. In 2020 it lost −6.1% against the basket's −3.4%, and in the 2015 CNY devaluation −3.6% against −0.6%. It crashes alongside everything else, which is the textbook carry-trade failure mode and the opposite of stability.
+
+For reference, global equities have historically delivered a Sharpe of roughly 0.40–0.50 and a 60/40 portfolio roughly 0.50–0.60 — both **passive allocations requiring no signal, no selection, and no timing**.
+
+**Conclusion**: on G10 FX, the wavelet features add nothing over the simplest known factor and actively hurt when combined with it. Carry alone is real but weak, and its return profile does not meet any reasonable definition of a stable investment. The bottleneck identified by the [power analysis](#detection-power-how-weak-a-signal-can-this-framework-detect) — too few assets, too little breadth — is not something further parameter tuning on the same data can fix.
+
 ---
 
 ## Project Structure
