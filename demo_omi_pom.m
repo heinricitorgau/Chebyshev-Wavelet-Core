@@ -724,9 +724,156 @@ else
         fxRes.icHitRate, fxRes.turnover, 100*fxRes.turnover*2/1e4*252);
     fprintf('  等權 G10 籃子買進持有 Sharpe %+.2f\n', ...
         fxRes.baseline.equalWeightBuyHold.sharpe);
-    fprintf(['  => 真實外匯上未偵測到可交易訊號，此為預期且誠實的結果。\n' ...
-             '     注意：ECB 參考匯率為純即期價格，不含利差(carry)；外匯\n' ...
-             '     的總報酬 = 即期變動 + 利差，故此處損益不等於可實現報酬。\n']);
+    fprintf('  => 真實外匯的純即期資料上，未偵測到可交易訊號。\n');
+
+    % ---- 補上利差，改用總報酬重跑，並與「純 carry 交易」對照 ----------
+    if ~isfile(fullfile('data', 'fx_carry_cache.mat'))
+        fprintf(['\n  （利差部分略過：尚未建立利率快取。請先執行一次\n' ...
+                 '    >> load_fx_data(''ReturnType'', ''total'')  ）\n']);
+    else
+        [tS, tT, tNames, tInfo] = load_fx_data('ReturnType', 'total', 'Offline', true);
+        fprintf('\n  加入利差後：%d 日（%s .. %s），樣本受利率資料起點限制\n', ...
+            numel(tT), string(tT(1), 'yyyy-MM-dd'), string(tT(end), 'yyyy-MM-dd'));
+        fprintf('  平均年化 carry（相對 %s，%%）：', tInfo.numeraire);
+        fprintf(' %s=%+.2f', [tNames; tInfo.carry.meanAnnualCarryPct]);
+        fprintf('\n');
+
+        tF   = wavelet_features(tS, tT, 'Windows', [21 63 252]);
+        tRes = cross_sectional_backtest(tF, tS, 'NullRuns', 100, 'CostBps', 2, ...
+            'MinAssets', 6, 'Quantile', 1/3);
+        fprintf('  小波(總報酬)  : IC %+.4f (p = %.3f) | Sharpe %+.2f | 周轉 %.3f/日\n', ...
+            tRes.meanIC, tRes.null.pIC, tRes.sharpe, tRes.turnover);
+
+        % 純 carry 交易：直接依已知利差排序，完全不使用小波特徵
+        [cR, cT, cN] = load_fx_carry('Offline', true);
+        [~, lc] = ismember(tNames, cN);
+        [~, ln] = ismember(tInfo.numeraire, cN);
+        mIdx = zeros(numel(tT), 1);
+        for ii = 1:numel(tT)
+            jj = find(cT <= tT(ii), 1, 'last');
+            if ~isempty(jj), mIdx(ii) = jj; end
+        end
+        cDiff = cR(mIdx, lc) - cR(mIdx, ln);
+        tRet  = [NaN(1, numel(tNames)); tS(2:end,:)./tS(1:end-1,:) - 1];
+        tFwd  = [tRet(2:end,:); NaN(1, numel(tNames))];
+        cPos  = zeros(size(tFwd));
+        for ii = 1:numel(tT)-1
+            [~, oo] = sort(cDiff(ii,:), 'descend');
+            cPos(ii, oo(1:3))       =  1/3;
+            cPos(ii, oo(end-2:end)) = -1/3;
+        end
+        cTurn = [0; sum(abs(diff(cPos)), 2)];
+        cNet  = sum(cPos .* tFwd, 2, 'omitnan') - (2/1e4)*cTurn;
+        st    = find(isfinite(tRes.lsRet), 1);
+        cv    = cNet(st:end);  cv = cv(isfinite(cv));
+        fprintf('  純 carry 交易 : Sharpe %+.2f | 周轉 %.4f/日（不使用小波特徵）\n', ...
+            mean(cv)/std(cv)*sqrt(252), mean(cTurn(st:end)));
+        fprintf(['  => 加入 carry 讓小波策略在方向上改善，但仍虧損且不顯著；\n' ...
+                 '     而最單純的已知因子（依利差排序）反而取得正 Sharpe。\n' ...
+                 '     周轉相差約 %.0f 倍是決定性因素。\n'], ...
+            tRes.turnover / max(mean(cTurn(st:end)), eps));
+
+        if SHOW_PLOTS
+            % --- 圖一：純即期資料的四格分析 -----------------------------
+            figFx = figure('Name', 'Real FX (spot)', 'Color', 'w', ...
+                'Position', [60 60 1000 720]);
+            subplot(2,2,1);
+            plot(fxT, 100*fxS./fxS(1,:), 'LineWidth', 1.0); grid on; box on;
+            legend(cellstr(fxNames), 'Location','northwest', 'FontSize',7, 'NumColumns',3);
+            ylabel('normalised level (start = 100)');
+            title({'ECB daily reference rates, valued in USD', ...
+                   sprintf('%d trading days, %s to %s', fxInfo.nObs, ...
+                   string(fxInfo.dateRange(1),'yyyy-MM'), ...
+                   string(fxInfo.dateRange(2),'yyyy-MM'))}, ...
+                'Interpreter','latex','FontSize',11);
+            set(gca,'FontSize',9);
+
+            subplot(2,2,2);
+            plot(fxT, fxRes.equity, '-', 'Color',[.15 .45 .75], 'LineWidth',1.6);
+            hold on; grid on; box on;
+            plot(fxT, fxRes.baseline.equalWeightBuyHold.equity, '-', ...
+                'Color',[.6 .6 .6], 'LineWidth',1.4);
+            yline(1,'k:');
+            legend({'cross-sectional long-short (2 bps)','equal-weight G10 basket'}, ...
+                'Location','southwest','FontSize',8);
+            ylabel('equity');
+            title(sprintf('Strategy Sharpe %.2f ($p = %.2f$) vs basket %.2f', ...
+                fxRes.sharpe, fxRes.null.pSharpe, ...
+                fxRes.baseline.equalWeightBuyHold.sharpe), ...
+                'Interpreter','latex','FontSize',11);
+            set(gca,'FontSize',9);
+
+            subplot(2,2,3);
+            histogram(fxRes.null.meanIC, 30, 'FaceColor',[.6 .6 .65], 'EdgeColor','none');
+            hold on; grid on; box on;
+            xline(fxRes.meanIC, 'r-', 'LineWidth',2);
+            xlabel('mean rank IC'); ylabel('count');
+            legend({'null distribution','observed'}, 'Location','northwest','FontSize',8);
+            title(sprintf('Observed IC %.4f sits inside the null ($p = %.2f$)', ...
+                fxRes.meanIC, fxRes.null.pIC), 'Interpreter','latex','FontSize',11);
+            set(gca,'FontSize',9);
+
+            subplot(2,2,4);
+            icOK   = isfinite(fxRes.ic);
+            rollIC = movmean(fxRes.ic, 252, 'omitnan', 'Endpoints','discard');
+            ttRoll = fxT(252:numel(fxRes.ic));
+            plot(ttRoll, rollIC(1:numel(ttRoll)), '-', 'Color',[.2 .5 .35], 'LineWidth',1.4);
+            hold on; grid on; box on;
+            yline(0,'k-','LineWidth',1.2);
+            yline(mean(fxRes.ic(icOK)),'r--','LineWidth',1.4);
+            xlabel('date'); ylabel('252-day rolling mean IC');
+            legend({'rolling IC','zero','full-sample mean'}, 'Location','northwest','FontSize',8);
+            title('Rolling IC swings sign: no stable signal', ...
+                'Interpreter','latex','FontSize',11);
+            set(gca,'FontSize',9);
+            export_png(figFx, 'fig_fx_real', EXPORT_PNG, FIG_DIR);
+
+            % --- 圖二：加入 carry 後的比較 -------------------------------
+            % 為公平比較，純即期需重跑在與總報酬相同的期間上
+            [~, locSp] = ismember(tT, fxT);
+            spAligned  = fxS(locSp, :);
+            spF        = wavelet_features(spAligned, tT, 'Windows', [21 63 252]);
+            spRes      = cross_sectional_backtest(spF, spAligned, 'CostBps', 2, ...
+                'MinAssets', 6, 'Quantile', 1/3);
+
+            cEqRet = cNet;  cEqRet(~isfinite(cEqRet)) = 0;
+            cEqRet(1:st-1) = 0;
+            cEquity = cumprod(1 + cEqRet);
+
+            figCar = figure('Name', 'FX carry comparison', 'Color', 'w', ...
+                'Position', [60 60 1000 430]);
+            subplot(1,2,1);
+            plot(tT, tRes.equity, '-', 'Color',[.15 .45 .75], 'LineWidth',1.7);
+            hold on; grid on; box on;
+            plot(tT, spRes.equity, '-', 'Color',[.75 .35 .15], 'LineWidth',1.4);
+            plot(tT, cEquity, '-', 'Color',[.15 .55 .3], 'LineWidth',1.7);
+            plot(tT, tRes.baseline.equalWeightBuyHold.equity, '-', ...
+                'Color',[.6 .6 .6], 'LineWidth',1.2);
+            yline(1,'k:');
+            legend({sprintf('wavelet, total return (Sharpe %.2f)', tRes.sharpe), ...
+                    sprintf('wavelet, spot only (Sharpe %.2f)', spRes.sharpe), ...
+                    sprintf('naive carry trade (Sharpe %.2f)', ...
+                            mean(cv)/std(cv)*sqrt(252)), ...
+                    'equal-weight G10 basket'}, ...
+                'Location','northwest','FontSize',8);
+            ylabel('equity'); xlabel('date');
+            title('G10 FX, 2002--2026, net of 2 bps', 'Interpreter','latex','FontSize',12);
+            set(gca,'FontSize',9);
+
+            subplot(1,2,2);
+            [srt, oSrt] = sort(tInfo.carry.meanAnnualCarryPct, 'descend');
+            bh = bar(srt, 'FaceColor', 'flat');
+            bh.CData = repmat([.45 .6 .8], numel(srt), 1);
+            bh.CData(srt < 0, :) = repmat([.85 .45 .35], sum(srt < 0), 1);
+            grid on; box on; yline(0, 'k-', 'LineWidth', 1.1);
+            set(gca, 'XTick', 1:numel(srt), 'XTickLabel', cellstr(tNames(oSrt)), ...
+                'FontSize', 9);
+            ylabel('mean annual carry vs USD (\%)');
+            title('Carry structure: classic high-yield vs funding split', ...
+                'Interpreter','latex','FontSize',12);
+            export_png(figCar, 'fig_fx_carry', EXPORT_PNG, FIG_DIR);
+        end
+    end
 end
 
 
@@ -738,6 +885,7 @@ fprintf('   help wavelet_features\n');
 fprintf('   help walkforward_backtest\n');
 fprintf('   help cross_sectional_backtest\n');
 fprintf('   help load_fx_data\n');
+fprintf('   help load_fx_carry\n');
 fprintf('===============================================================\n');
 
 

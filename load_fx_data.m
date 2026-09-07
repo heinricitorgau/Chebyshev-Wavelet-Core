@@ -54,6 +54,11 @@ function [S, T, names, info] = load_fx_data(opts)
 %     'ForceRefresh' true 時忽略快取重新取得（預設 false）
 %     'Offline'      true 時只讀快取、不連網；快取不足即報錯（預設 false）
 %     'Timeout'      HTTP 逾時秒數（預設 60）
+%     'ReturnType'   "spot"(預設) | "total"。設為 "total" 時會呼叫
+%                    load_fx_carry 取得三個月期利率，輸出「總報酬指數」
+%                    （即期變動 + 利差）而非純即期價格。此時樣本會縮短為
+%                    與利率資料重疊的區間，且 info.eurRates 不再提供。
+%     'DayCount'     總報酬計算的計息基準日數（預設 360，貨幣市場慣例）
 %
 %   輸出：
 %     S      價格矩陣 nObs x nCur，每行為一種貨幣以計價幣表示的價值
@@ -92,6 +97,8 @@ arguments
     opts.ForceRefresh (1,1) logical = false
     opts.Offline      (1,1) logical = false
     opts.Timeout      (1,1) double {mustBePositive} = 60
+    opts.ReturnType   (1,1) string {mustBeMember(opts.ReturnType, ["spot","total"])} = "spot"
+    opts.DayCount     (1,1) double {mustBePositive} = 360
 end
 
 API_BASE = "https://api.frankfurter.dev/v1";
@@ -198,6 +205,55 @@ if isempty(S)
 end
 
 % =========================================================================
+% 4b. （選用）加上利差，建構總報酬指數
+% =========================================================================
+carryInfo = [];
+if opts.ReturnType == "total"
+    [cRate, cT, cNames] = load_fx_carry('Currencies', unique([names, num]), ...
+        'Offline', opts.Offline, 'Timeout', opts.Timeout);
+
+    % 月頻利率以「前向填補」對齊至交易日；因 load_fx_carry 已套用公布落後，
+    % 任一交易日只會用到該日之前已可得的利率。
+    idx = zeros(numel(T), 1);
+    for i = 1:numel(T)
+        j = find(cT <= T(i), 1, 'last');
+        if ~isempty(j)
+            idx(i) = j;
+        end
+    end
+    hasRate = idx > 0 & T <= max(cT) + calmonths(1);
+    if ~any(hasRate)
+        error('load_fx_data:noCarryOverlap', ...
+            '利率資料與匯率資料沒有重疊期間。');
+    end
+    if sum(~hasRate) > 0
+        fprintf(['load_fx_data: 因利率資料涵蓋範圍較窄，剔除 %d 個交易日；' ...
+                 '總報酬區間 %s .. %s\n'], sum(~hasRate), ...
+            string(min(T(hasRate)), 'yyyy-MM-dd'), string(max(T(hasRate)), 'yyyy-MM-dd'));
+    end
+
+    S = S(hasRate, :);
+    T = T(hasRate);
+    idx = idx(hasRate);
+
+    % 各幣別與計價幣的年化利差
+    [~, locC] = ismember(names, cNames);
+    [~, locN] = ismember(num, cNames);
+    diffRate  = cRate(idx, locC) - cRate(idx, locN);      % nObs x nCur
+
+    % 總報酬指數：即期報酬 + 持有期間的利差
+    %   TRI_t = TRI_{t-1} * (S_t/S_{t-1}) * (1 + (i_X - i_num) * dt)
+    dt = [0; days(diff(T))] / opts.DayCount;              % 貨幣市場慣例
+    growth = [ones(1, numel(names)); S(2:end,:) ./ S(1:end-1,:)] .* ...
+             (1 + diffRate .* dt);
+    S = S(1,:) .* cumprod(growth, 1);
+
+    carryInfo = struct('meanAnnualCarryPct', 100*mean(diffRate, 1), ...
+        'currencies', names, 'dayCount', opts.DayCount, ...
+        'window', [min(T), max(T)]);
+end
+
+% =========================================================================
 % 5. 輸出資訊
 % =========================================================================
 info = struct();
@@ -209,10 +265,18 @@ info.numeraire         = num;
 info.nObs              = numel(T);
 info.nCurrencies       = numel(names);
 info.dateRange         = [min(T), max(T)];
-info.eurRates          = Rall(good, :);
 info.eurCurrencies     = cache.currencies;
 info.missingByCurrency = missingByCur;
-info.note              = "即期匯率，不含利差(carry)；非可成交報價，無買賣價差。";
+info.returnType        = opts.ReturnType;
+info.carry             = carryInfo;
+if opts.ReturnType == "total"
+    info.eurRates = [];                          % 總報酬模式下已重新取樣，不再對應
+    info.note = "總報酬指數 = 即期變動 + 三個月期利差；為近似值，" + ...
+                "忽略換匯基差與買賣價差。";
+else
+    info.eurRates = Rall(good, :);
+    info.note = "即期匯率，不含利差(carry)；非可成交報價，無買賣價差。";
+end
 end % ===================== main function =====================
 
 
