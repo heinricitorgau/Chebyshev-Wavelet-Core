@@ -29,6 +29,7 @@ This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from
 - [Application Module: Cross-Sectional Long-Short Backtesting](#application-module-cross-sectional-long-short-backtesting-cross_sectional_backtest)
 - [Real Data: FX](#real-data-fx-load_fx_data)
 - [Real Data: Equity/Country ETFs](#real-data-equitycountry-etfs-load_etf_data)
+- [Risk Filter](#risk-filter-wavelet_risk_filter)
 - [Project Structure](#project-structure)
 - [Citation](#citation)
 - [License](#license)
@@ -860,6 +861,66 @@ With monthly rebalancing and 200 null runs, the best configuration looks promisi
 
 ---
 
+## Risk Filter: `wavelet_risk_filter`
+
+The directional work above hit a regime-stability wall. This module repurposes the wavelet features from *ranking signal* to *exposure control*, overlaid on the passive equal-weight ETF portfolio.
+
+The motivation is statistical: daily return autocorrelation measured 0.00–0.05 in this project, but |return| autocorrelation runs 0.2–0.4. Volatility clustering is far more predictable than direction.
+
+```matlab
+[S, T] = load_etf_data();
+e      = wavelet_risk_filter(S, T, 'Verify', true);   % causal exposure in [0,1]
+```
+
+Exposure is set by volatility targeting, $e(t)=\min(1,\ \sigma_{\text{target}}(t)/\hat\sigma(t))$, where $\sigma_{\text{target}}(t)$ is the **expanding-window median** of $\hat\sigma$ over $[1,t-1]$ — so the target is set by history rather than by a hand-chosen constant, and mean exposure lands near 1 by construction. Causality is enforced and self-tested (`leakTest = 0`).
+
+### Two Comparisons Without Which Any Result Is Meaningless
+
+Every de-risking scheme lowers drawdown *and* return, so:
+
+- **Volatility-matched benchmark.** Scale buy-and-hold to the same realised volatility before comparing. Otherwise "lower drawdown" is just lower leverage, not skill.
+- **Comparison against a trivial estimator.** The question is not "does vol targeting help" (known: it helps drawdowns) but "does the *wavelet* volatility estimate beat a one-line EWMA recursion". Same discipline as benchmarking against carry and momentum.
+
+### Result: The Overlay Works — the Wavelet Does Not Add to It
+
+31 ETFs, 2001-08 to 2026-09, 5 bps per unit exposure change:
+
+| Strategy | Sharpe | Annual % | Vol % | maxDD % | Skew |
+|---|---|---|---|---|---|
+| Buy and hold | +0.56 | +10.97 | 19.70 | 58.7 | −0.26 |
+| **Buy and hold, scaled 0.68× (vol-matched)** | **+0.56** | +7.46 | 13.39 | **43.7** | −0.26 |
+| **EWMA filter** | **+0.67** | +8.88 | 13.32 | **32.9** | −0.56 |
+| Wavelet filter | +0.67 | +8.91 | 13.39 | 36.0 | −0.52 |
+
+Against the *volatility-matched* benchmark the overlay delivers Sharpe +0.56 → +0.67, max drawdown 43.7% → 36.0%, and **+1.45 percentage points of annual return at identical volatility**. A block-bootstrap null that reshuffles the exposure path while preserving its marginal distribution and persistence confirms the timing is not luck: observed Sharpe 0.666 against a null of 0.515 ± 0.057 (p = 0.007), observed maxDD 0.360 against 0.533 ± 0.042 (p = 0.007).
+
+**This is the first genuinely positive result in the project.** It is also the clearest demonstration that the wavelet machinery is not what produces it:
+
+| Wavelet vs EWMA | |
+|---|---|
+| Sharpe difference | −0.001 |
+| maxDD difference | +3.2 pp (wavelet worse) |
+| Exposure-path correlation | **0.960** |
+| σ forecast vs future 21-day realised vol | 0.632 (wavelet) vs **0.670** (EWMA) |
+| Same, in log scale | 0.643 vs **0.675** |
+| Median σ level (actual realised 13.7%) | 15.2% vs **14.0%** |
+
+The wavelet volatility estimate is marginally *worse* at forecasting volatility and *less well calibrated in level* than a one-line EWMA. The distinctively wavelet feature `rough` (high-order coefficient energy, which EWMA has no analogue for) raised Sharpe by only +0.022 while worsening drawdown, on a hand-picked threshold — specification search, not a finding.
+
+### Honest Caveat on Stability
+
+| | 2001–2013 | 2014–2026 |
+|---|---|---|
+| Buy and hold | +0.51 | **+0.64** |
+| Wavelet filter | **+0.76** | +0.57 |
+| EWMA filter | **+0.78** | +0.55 |
+
+The overlay's advantage is concentrated in the crisis-heavy first half. In the calmer second half it slightly *underperforms* volatility-matched buy-and-hold, which is the expected behaviour of volatility targeting: it earns its keep during volatility spikes and costs return during sustained bull markets. Note also that Moreira & Muir (2017) reported gains from volatility-managed portfolios, while Cederburg et al. (2020) found them fragile out of sample — positive results in this area are less solid than they appear.
+
+**Conclusion**: volatility targeting is a real and useful overlay for reducing drawdown, and it is worth keeping. The Chebyshev wavelet contributes nothing to it beyond what a two-line EWMA already provides.
+
+---
+
 ## Project Structure
 
 ```
@@ -869,7 +930,8 @@ chebyshev_wavelet_core/
 │   └── project_root.m               % Resolves the package root (path safety)
 ├── pipeline/
 │   ├── wavelet_denoise_series.m     % Denoising and trend features (batch)
-│   └── wavelet_features.m           % Causal feature extraction (for models)
+│   ├── wavelet_features.m           % Causal feature extraction (for models)
+│   └── wavelet_risk_filter.m        % Risk/volatility filter (exposure control)
 ├── backtest/
 │   ├── walkforward_backtest.m       % Single-series prediction & backtesting
 │   └── cross_sectional_backtest.m   % Cross-sectional long-short backtesting
