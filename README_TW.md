@@ -943,6 +943,8 @@ chebyshev_wavelet_core/
 │   └── load_etf_data.m              % 31 檔國家／產業 ETF，來源 Yahoo
 ├── demos/
 │   └── demo_omi_pom.m               % 示範腳本（12 個章節，見下）
+├── docs/
+│   └── PAPER_OUTLINE.md             % 由本 repo 整理的方法論論文綱要
 ├── figures/                         % README 所用圖檔（由示範腳本產生）
 │   ├── fig_basis.png
 │   ├── fig_structure.png
