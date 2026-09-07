@@ -68,10 +68,15 @@ function [rates, T, names, info] = load_fx_carry(opts)
 arguments
     opts.Currencies   (1,:) string = ["USD","EUR","JPY","GBP","CHF","AUD","NZD","CAD","SEK","NOK"]
     opts.LagMonths    (1,1) double {mustBeInteger, mustBeNonnegative} = 1
-    opts.CacheFile    (1,1) string = fullfile("data", "fx_carry_cache.mat")
+    opts.CacheFile    (1,1) string = ""
     opts.ForceRefresh (1,1) logical = false
     opts.Offline      (1,1) logical = false
     opts.Timeout      (1,1) double {mustBePositive} = 60
+end
+
+% 快取路徑相對於套件根目錄，而非目前工作目錄（理由同 load_fx_data）
+if strlength(opts.CacheFile) == 0
+    opts.CacheFile = fullfile(project_root(), "data", "fx_carry_cache.mat");
 end
 
 % OECD 三個月期銀行同業拆款利率於 FRED 的序列代碼

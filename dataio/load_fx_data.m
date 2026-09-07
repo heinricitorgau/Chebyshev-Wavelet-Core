@@ -93,7 +93,7 @@ arguments
     opts.Numeraire    (1,1) string = "USD"
     opts.StartDate    (1,1) string = "1999-01-04"
     opts.EndDate      (1,1) string = string(datetime('today'), 'yyyy-MM-dd')
-    opts.CacheFile    (1,1) string = fullfile("data", "fx_ecb_cache.mat")
+    opts.CacheFile    (1,1) string = ""
     opts.ForceRefresh (1,1) logical = false
     opts.Offline      (1,1) logical = false
     opts.Timeout      (1,1) double {mustBePositive} = 60
@@ -102,6 +102,12 @@ arguments
 end
 
 API_BASE = "https://api.frankfurter.dev/v1";
+
+% 快取路徑相對於套件根目錄，而非目前工作目錄，以免從不同目錄執行時
+% 找不到既有快取、或把檔案寫到非預期的位置。
+if strlength(opts.CacheFile) == 0
+    opts.CacheFile = fullfile(project_root(), "data", "fx_ecb_cache.mat");
+end
 
 cur = upper(opts.Currencies);
 num = upper(opts.Numeraire);

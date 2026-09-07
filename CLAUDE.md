@@ -1,0 +1,104 @@
+# CLAUDE.md
+
+給 Claude Code 的專案指引。人類讀者請看 [README.md](README.md)（英文）或 [README_TW.md](README_TW.md)（繁體中文）。
+
+## 這個專案是什麼
+
+以 MATLAB 實作第二類 Chebyshev 小波的積分運算矩陣（OMI）與乘積運算矩陣（POM），依據 Nigam & Alam (2026), *Tamkang J. Math.* 57(3), 171–193，並在其上建構一條完整的金融時間序列研究管線：去噪 → 因果特徵 → 單一序列回測 → 橫斷面回測 → 真實外匯資料 → 利差。
+
+**這是一個研究專案，不是交易系統。** 目前在真實 G10 外匯上的結論是「未找到可交易訊號」，且該結論已寫入文件。不要為了讓數字好看而調參——本專案的價值在於嚴謹的驗證流程，不在於績效。
+
+## 目錄結構
+
+```
+core/       build_chebyshev_matrices.m  論文核心數學（OMI / POM）
+            project_root.m              取得套件根目錄（見「路徑規則」）
+pipeline/   wavelet_denoise_series.m    去噪與趨勢特徵（批次、非因果）
+            wavelet_features.m          因果特徵萃取（供建模使用）
+backtest/   walkforward_backtest.m      單一序列預測與 walk-forward 回測
+            cross_sectional_backtest.m  橫斷面多空回測
+dataio/     load_fx_data.m              ECB 外匯日資料（Frankfurter API）
+            load_fx_carry.m             G10 短期利率（FRED）
+demos/      demo_omi_pom.m              十二節示範，產生 README 所有圖檔
+figures/    README 使用的 PNG（由示範腳本產生，勿手動編輯）
+data/       抓取的資料快取（已 gitignore，不進版控）
+setup_paths.m                           一次加入所有子目錄至搜尋路徑
+```
+
+## 執行方式
+
+```matlab
+cd path/to/chebyshev_wavelet_core
+setup_paths          % 必要：加入所有子目錄
+demo_omi_pom         % 完整示範（約數分鐘）
+```
+
+示範腳本會自行加入路徑，故 `demo_omi_pom` 也可在未執行 `setup_paths` 時直接呼叫。
+
+## 硬性慣例（違反會破壞既有性質）
+
+**不得引入任何工具箱相依。** README 明確承諾「必要工具箱：無」。`corr`、`tiedrank`、`zscore`、`prctile`、`fitlm`、`glmfit` 等皆屬 Statistics Toolbox，禁止使用——本專案已自行實作 `local_tiedrank`、`local_corr`、ridge 閉式解與 IRLS logistic。新增程式後請執行：
+
+```bash
+grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quantile|ttest)\s*\(' **/*.m
+```
+
+**註解用繁體中文，圖表文字用英文。** MATLAB 預設字型不含 CJK，中文標籤在 `exportgraphics` 匯出的 PNG 中會變成方框，且其他平台未必安裝中文字型。
+
+**兩份 README 必須同步。** `README.md`（英文，主要）與 `README_TW.md`（繁體中文）內容必須一致，含目錄、專案結構、章節表與所有數據表。修改其一必須同步另一份。
+
+**所有圖檔必須可由示範腳本重現。** README 寫著「設 `EXPORT_PNG = true` 重跑即可重新產生圖檔」。若新增圖表，其產生程式必須放進 `demos/demo_omi_pom.m`，不可用一次性腳本產生後提交——那會使文件敘述變成假的。
+
+**路徑規則：一律使用 `project_root()`，不得相對於 `pwd`。** 資料快取與圖檔位置必須與目前工作目錄無關，否則從不同目錄執行會找不到快取或把檔案寫錯地方。
+
+## 方法論規則（本專案最重要的部分）
+
+這些規則都是在開發過程中因為實際踩到問題而建立的，違反會導致錯誤結論。
+
+**因果性優先。** 特徵在時刻 `t` 只能使用 `t` 及之前的資料。`wavelet_features` 提供 `'Verify', true` 會擾動未來資料並檢查過去特徵是否改變（必須為 0，否則直接報錯）。實測前視偏誤可在毫無訊號的資料上虛增最多 7.5 個百分點的樣本外準確率。
+
+**任何績效宣稱都必須先過虛無假設檢定。** 回測模組皆內建 `'NullRuns'`。沒有 p 值的 Sharpe 沒有意義。
+
+**虛無檢定本身的校準必須驗證，不能假設。** 開發中發現原本以內部驗證選擇 λ 會使 `P(p<0.05)` 由 0.05 膨脹至 0.10~0.125——校準不良的顯著性檢定比沒有檢定更危險。改用固定 λ 後回到名目水準。新增或修改虛無檢定機制時，必須在「無訊號」的合成資料上重跑校準（40~50 次重複），確認 p 值接近均勻分布。
+
+**p 值顯著不等於有獲利。** 當交易成本夠高時，整個虛無分布會被壓成負值；此時觀測值「贏過多數虛無樣本」只代表「賠得比隨機少」。本專案已兩次踩到此陷阱（皆已記錄於 README）。判定訊號時要求 IC 與 Sharpe 的 p 值**同時**顯著。
+
+**橫斷面模組的 IC p 值左尾偏厚。** 實測 `P(p<0.05)` 約 0.10（名目兩倍，約 2 個標準誤）。三輪調查未找到可修正的機制，故文件建議 IC 的 p 值採用 0.01 門檻。不要把 0.05 附近的結果當成結論。
+
+**在有漂移的價格序列上，準確率與 Sharpe 都會獎勵單純做多。** 對照基準不是 0.5，而是 `res.baseline` 同時回報的多數類與買進持有績效。
+
+**效能數字不可在 CPU 競爭下量測。** 本機實測同一運算在不同 MATLAB 行程間可差 6 倍。發布基準前須在機器閒置時量測，並註明量測條件。
+
+## 驗證方式
+
+```matlab
+% 全部檔案的靜態檢查（應全部 clean）
+for f = ["core/build_chebyshev_matrices.m", "core/project_root.m", ...
+         "pipeline/wavelet_denoise_series.m", "pipeline/wavelet_features.m", ...
+         "backtest/walkforward_backtest.m", "backtest/cross_sectional_backtest.m", ...
+         "dataio/load_fx_data.m", "dataio/load_fx_carry.m", ...
+         "demos/demo_omi_pom.m", "setup_paths.m"]
+    r = checkcode(f);
+    fprintf('%-45s %d issues\n', f, numel(r));
+end
+
+% 核心數學：應與論文 Eq.(4.9) 逐項相同（誤差 0）
+[~,~,info] = build_chebyshev_matrices(3, 4, false, [], 'Verify', true);
+disp(info.verify)
+
+% 因果性：leakTest 必須為 0
+[~,~,~,d] = wavelet_features(S, T, 'Verify', true);
+```
+
+## 已知結果（勿重複驗證）
+
+- **核心數學正確**：與論文 Eq.(4.9) 逐項誤差 0；論文的通式 Eqs.(4.11)/(4.12) 有排版錯誤，本實作採與 Eq.(4.9) 一致的版本（已記錄於 README）。
+- **偵測力上限**：單一序列在 n=2500 下需 AR(1) φ ≈ 0.20 才偵測得到，真實股票僅 0.00~0.05。瓶頸是標的廣度，非參數。
+- **真實 G10 外匯**：純即期與總報酬皆未找到可交易訊號。加入 carry 為特徵後，小波特徵反而使 Sharpe 由 +0.27 降至 −0.18（周轉上升 123 倍）。純 carry 策略 Sharpe 0.27、最大回撤 30.4%、復原耗時 4 年，不符合穩定投資的標準。
+
+## 操作上的坑
+
+- **MATLAB 的 `webread` 無法連上 FRED**（連線被重設；加 User-Agent 後變逾時），但 curl 正常。`load_fx_carry` 已內建 curl 後備路徑。
+- **背景研究執行期間不要修改被測的 `.m` 檔**。MATLAB 會在函數被呼叫時檢查時間戳並重新載入，導致後段重複使用到新版本，整個研究混到兩個版本。本專案已因此重跑過兩次。
+- **不要用 bash heredoc 傳含 LaTeX 反斜線的內容**（`\text`、`\approx` 會被 shell 解讀成控制字元）。改用 Write/Edit 工具。
+- **重跑示範腳本會覆寫所有 PNG，但多數只有 metadata 變動**（檔案大小完全相同）。提交前應剔除這類無意義的二進位變動，只提交實際改變的圖檔。

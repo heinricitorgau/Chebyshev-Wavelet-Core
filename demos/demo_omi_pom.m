@@ -29,9 +29,17 @@
 %   License: MIT (see LICENSE)
 
 clear; clc; close all;
+
+% 自行加入套件各子目錄，使本腳本可從任何工作目錄執行
+demoRoot = fileparts(fileparts(mfilename('fullpath')));
+addpath(fullfile(demoRoot, 'core'), fullfile(demoRoot, 'pipeline'), ...
+        fullfile(demoRoot, 'backtest'), fullfile(demoRoot, 'dataio'));
+
 SHOW_PLOTS = true;      % 設為 false 可在無圖形環境 (如 CI) 下執行
 EXPORT_PNG = false;     % 設為 true 可將圖表輸出成 PNG (README 所用圖檔)
-FIG_DIR    = 'figures'; % PNG 輸出目錄
+% 圖檔與資料快取的位置一律相對於套件根目錄，不受目前工作目錄影響
+FIG_DIR    = fullfile(project_root(), 'figures');
+DATA_DIR   = fullfile(project_root(), 'data');
 %
 % 圖表文字一律使用英文：MATLAB 預設字型不含 CJK 字元，中文標籤在
 % exportgraphics 輸出的 PNG 中會顯示為方框，且其他平台未必安裝中文字型。
@@ -696,7 +704,7 @@ end
 % 略過，以維持整份示範腳本在離線環境下的可重現性。
 fprintf('\n【12】真實外匯資料：ECB G10 每日參考匯率\n');
 
-fxCache = fullfile('data', 'fx_ecb_cache.mat');
+fxCache = fullfile(DATA_DIR, 'fx_ecb_cache.mat');
 if ~isfile(fxCache)
     fprintf(['  略過：尚未建立資料快取。請先在可連網時執行一次\n' ...
              '      >> load_fx_data\n' ...
@@ -727,7 +735,7 @@ else
     fprintf('  => 真實外匯的純即期資料上，未偵測到可交易訊號。\n');
 
     % ---- 補上利差，改用總報酬重跑，並與「純 carry 交易」對照 ----------
-    if ~isfile(fullfile('data', 'fx_carry_cache.mat'))
+    if ~isfile(fullfile(DATA_DIR, 'fx_carry_cache.mat'))
         fprintf(['\n  （利差部分略過：尚未建立利率快取。請先執行一次\n' ...
                  '    >> load_fx_data(''ReturnType'', ''total'')  ）\n']);
     else

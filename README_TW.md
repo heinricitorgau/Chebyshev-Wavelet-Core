@@ -128,10 +128,15 @@ $$
 
 ## 安裝
 
+程式碼分置於數個子目錄，請以內附的輔助函數一次加入：
+
 ```matlab
-addpath('path/to/chebyshev_wavelet_core');
-savepath;   % 選用：永久加入搜尋路徑
+cd path/to/chebyshev_wavelet_core
+setup_paths            % 加入 core/ pipeline/ backtest/ dataio/ demos/
+setup_paths('save')    % 同上，並以 savepath 永久保存
 ```
+
+`setup_paths` 以自身位置推得路徑，故從任何工作目錄呼叫皆可運作。示範腳本會自行加入路徑，因此 `demo_omi_pom` 也可在未執行 `setup_paths` 時直接呼叫。
 
 ---
 
@@ -799,17 +804,21 @@ Fboth = cat(2, Fw, Fc);                                   % 19 個
 
 ```
 chebyshev_wavelet_core/
-├── build_chebyshev_matrices.m   % 主函數（含 5 個局部函數：基底求值、
-│                                %   函數展開、自我驗證、閉式反導函數、
-│                                %   Chebyshev 多項式遞迴）
-├── wavelet_denoise_series.m     % 應用模組 1：金融時間序列去噪與趨勢特徵
-├── wavelet_features.m           % 應用模組 2：因果特徵萃取（供預測模型使用）
-├── walkforward_backtest.m       % 應用模組 3：預測模型與 walk-forward 回測
-├── cross_sectional_backtest.m   % 應用模組 4：橫斷面多空回測
-├── load_fx_data.m               % 真實資料：ECB 外匯每日參考匯率
-├── load_fx_carry.m              % 真實資料：G10 短期利率（carry），來源 FRED
-├── demo_omi_pom.m               % 示範腳本（12 個章節，見下）
-├── figures/                     % README 所用圖檔（由示範腳本產生）
+├── core/
+│   ├── build_chebyshev_matrices.m   % 論文核心：OMI 與 POM
+│   └── project_root.m               % 取得套件根目錄（路徑安全）
+├── pipeline/
+│   ├── wavelet_denoise_series.m     % 去噪與趨勢特徵（批次）
+│   └── wavelet_features.m           % 因果特徵萃取（供建模使用）
+├── backtest/
+│   ├── walkforward_backtest.m       % 單一序列預測與回測
+│   └── cross_sectional_backtest.m   % 橫斷面多空回測
+├── dataio/
+│   ├── load_fx_data.m               % ECB 外匯每日參考匯率
+│   └── load_fx_carry.m              % G10 短期利率（carry），來源 FRED
+├── demos/
+│   └── demo_omi_pom.m               % 示範腳本（12 個章節，見下）
+├── figures/                         % README 所用圖檔（由示範腳本產生）
 │   ├── fig_basis.png
 │   ├── fig_structure.png
 │   ├── fig_convergence.png
@@ -821,8 +830,11 @@ chebyshev_wavelet_core/
 │   ├── fig_crosssection.png
 │   ├── fig_fx_real.png
 │   └── fig_fx_carry.png
-├── README.md                    % 英文
-├── README_TW.md                 % 繁體中文
+├── data/                            % 抓取的資料快取（已 gitignore）
+├── setup_paths.m                    % 一次加入所有子目錄至搜尋路徑
+├── CLAUDE.md                        % 給 Claude Code 的專案指引
+├── README.md                        % 英文
+├── README_TW.md                     % 繁體中文
 └── LICENSE
 ```
 
