@@ -115,6 +115,12 @@ function [res, diagOut] = cross_sectional_backtest(F, S, opts)
 %     'Normalize'    'rank'(預設) | 'zscore'
 %     'Quantile'     多空各取的比例（預設 0.2，即前後各 20%）
 %     'MinAssets'    當日有效標的數低於此值即略過（預設 10）
+%     'RebalanceEvery' 每隔幾個交易日重建組合（預設 1 = 每日）。設為 21
+%                    約當每月再平衡。高周轉訊號在每日再平衡下幾乎必然
+%                    被交易成本吞噬（實測 ETF 面板上小波訊號周轉達
+%                    1.99/日，5 bps 下年化成本約 25%），此時應同時檢視
+%                    較低的再平衡頻率，才能區分「訊號無效」與「實作方式
+%                    不當」。
 %     'CostBps'      單邊交易成本，基點（預設 0）
 %     'NullRuns'     虛無假設檢定次數（預設 0；建議 200）
 %     'NullMode'     'date'(預設) | 'asset'，見上方「虛無假設檢定」與校準表
@@ -159,6 +165,7 @@ arguments
     opts.Normalize    (1,:) char {mustBeMember(opts.Normalize, {'rank','zscore'})} = 'rank'
     opts.Quantile     (1,1) double {mustBePositive} = 0.2
     opts.MinAssets    (1,1) double {mustBeInteger, mustBePositive} = 10
+    opts.RebalanceEvery (1,1) double {mustBeInteger, mustBePositive} = 1
     opts.CostBps      (1,1) double {mustBeNonnegative} = 0
     opts.NullRuns     (1,1) double {mustBeInteger, mustBeNonnegative} = 0
     opts.NullMode     (1,:) char {mustBeMember(opts.NullMode, {'date','asset'})} = 'date'
@@ -385,6 +392,7 @@ lsRet  = NaN(nObs, 1);
 wPrev  = zeros(1, nAssets);
 turn   = NaN(nObs, 1);
 nSide  = NaN(nObs, 1);
+nRebal = 0;                              % 已處理的交易日計數（決定再平衡時點）
 
 for t = 1:nObs
     m = useMask(t,:) & isfinite(score(t,:));
@@ -399,18 +407,24 @@ for t = 1:nObs
     ic(t) = local_corr(local_tiedrank(sc), local_tiedrank(yy));
 
     % 多空組合：前後各 q 比例，等權、金額中性
+    % 僅於再平衡日重建組合，其餘日期沿用既有部位（'RebalanceEvery'）。
+    % 每日再平衡對高周轉訊號等同判死刑：實測 ETF 面板上小波訊號的周轉
+    % 達 1.99/日，於 5 bps 下年化成本約 25%，足以吞噬任何真實訊號。
     nq = max(1, floor(opts.Quantile * numel(idx)));
-    [~, ord] = sort(sc, 'descend');
-    longIdx  = idx(ord(1:nq));
-    shortIdx = idx(ord(end-nq+1:end));
-    w = zeros(1, nAssets);
-    w(longIdx)  =  1/nq;
-    w(shortIdx) = -1/nq;
+    if nRebal == 0 || mod(nRebal, opts.RebalanceEvery) == 0
+        [~, ord] = sort(sc, 'descend');
+        longIdx  = idx(ord(1:nq));
+        shortIdx = idx(ord(end-nq+1:end));
+        w = zeros(1, nAssets);
+        w(longIdx)  =  1/nq;
+        w(shortIdx) = -1/nq;
+    else
+        w = wPrev;                       % 未到再平衡日，維持原部位
+    end
+    nRebal = nRebal + 1;
 
     turn(t)  = sum(abs(w - wPrev));
-    lsRet(t) = sum(w(longIdx).*fwdRet(t,longIdx)) + ...
-               sum(w(shortIdx).*fwdRet(t,shortIdx)) - ...
-               (opts.CostBps/1e4) * turn(t);
+    lsRet(t) = sum(w .* fwdRet(t,:), 'omitnan') - (opts.CostBps/1e4) * turn(t);
     wPrev    = w;
     nSide(t) = nq;
 end

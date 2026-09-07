@@ -28,6 +28,7 @@ This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from
 - [Application Module: Prediction & Walk-Forward Backtesting](#application-module-prediction--walk-forward-backtesting-walkforward_backtest)
 - [Application Module: Cross-Sectional Long-Short Backtesting](#application-module-cross-sectional-long-short-backtesting-cross_sectional_backtest)
 - [Real Data: FX](#real-data-fx-load_fx_data)
+- [Real Data: Equity/Country ETFs](#real-data-equitycountry-etfs-load_etf_data)
 - [Project Structure](#project-structure)
 - [Citation](#citation)
 - [License](#license)
@@ -798,6 +799,67 @@ For reference, global equities have historically delivered a Sharpe of roughly 0
 
 ---
 
+## Real Data: Equity/Country ETFs `load_etf_data`
+
+The FX work identified breadth as the bottleneck: 9 currencies is too few. This module raises breadth to **31 country and sector ETFs** (2001-08 to 2026-09, 6293 trading days), fetched from the Yahoo Finance chart API (free, no key).
+
+```matlab
+[S, T, names] = load_etf_data();          % 31 ETFs, dividend-adjusted
+F   = wavelet_features(S, T, 'Windows', [21 63 252]);
+res = cross_sectional_backtest(F, S, 'NullRuns', 200, 'CostBps', 5, ...
+                               'RebalanceEvery', 21);
+```
+
+### Why ETFs Rather Than Individual Stocks: Survivorship Bias
+
+The dominant trap in equity cross-sections. Taking *today's* index constituents and pulling their history keeps only firms that passed two filters: they survived, and they are still in the index today. Bankruptcies, delistings, acquisitions and index deletions all vanish, inflating backtest returns by an estimated 1–4 percentage points per year for US equities — far larger than the signal being sought. Worse, **this bias lives in the data, so none of the null tests in this repo can catch it**. Avoiding it properly requires point-in-time constituent history, which free sources do not provide.
+
+Country and sector ETFs largely sidestep this: such funds rarely liquidate and the universe is stable. But the bias is **not zero** — the universe is still drawn from funds that exist today, and some ETFs have historically been wound up. The residual bias should be far smaller than for single stocks, but it should not be claimed to be absent.
+
+### Dividend Adjustment Is Mandatory, Not Optional
+
+Measured implied annual dividend yields across the universe span **1.08% (XLK) to 4.25% (EWM)** — a 3.2 percentage-point spread, with European/Asian country funds at the top and US growth sectors at the bottom. Using unadjusted closes would inject that spread straight into the cross-sectional ranking as a spurious signal. This is the exact analogue of needing to add carry back for FX. The module returns dividend-adjusted prices by default.
+
+### Breadth Worked: the Signal Became Statistically Real
+
+| Universe | Assets | Wavelet mean IC | p(IC) |
+|---|---|---|---|
+| G10 FX | 9 | +0.0051 | 0.144 |
+| **Country/sector ETFs** | **31** | **+0.0319** | **0.005** |
+
+Raising breadth 3.4× moved the cross-sectional IC from undetectable to clearly significant — exactly what the [power analysis](#detection-power-how-weak-a-signal-can-this-framework-detect) predicted.
+
+### Daily Rebalancing Was Destroying the Signal
+
+At daily rebalancing every configuration lost heavily (wavelet Sharpe −0.63). The cause was turnover, not the signal: **1.989 per day, which at 5 bps costs about 25% per year.** The IC is identical at every rebalancing frequency — only the cost changes:
+
+| Config | Rebalance | Sharpe | Turnover | Annual cost |
+|---|---|---|---|---|
+| Wavelet only | daily | −0.63 | 1.989 | 25.1% |
+| Wavelet only | monthly | +0.10 | 0.149 | 1.9% |
+| Wavelet only | quarterly | +0.16 | 0.051 | 0.6% |
+| Momentum + wavelet | monthly | **+0.22** | 0.146 | 1.8% |
+
+This exposed a real limitation of `cross_sectional_backtest`, which previously forced daily rebalancing — a death sentence for any high-turnover signal, and one that masquerades as "the signal does not work". The `'RebalanceEvery'` option now makes this separable. `'RebalanceEvery', 1` reproduces the previous behaviour exactly.
+
+### But It Is Still Not a Usable Strategy
+
+With monthly rebalancing and 200 null runs, the best configuration looks promising on the surface — Sharpe +0.22 with p(Sharpe) = 0.020, p(IC) = 0.005, 61% positive years, max drawdown 0.279, positive skew. Three independent reasons say otherwise:
+
+| Configuration | 2001–2013 | 2014–2026 |
+|---|---|---|
+| Wavelet only | +0.40 | **−0.68** |
+| Momentum only | −0.05 | −0.14 |
+| Momentum + wavelet | +0.43 | **−0.60** |
+
+1. **The full-sample number is an average over a regime change.** All of the +0.22 comes from the first half; the last 12 years are −0.60. That is a strategy that worked and then stopped, not a stable one. (Cross-sectional momentum decay after 2009 is well documented, so this failure mode is consistent with the literature rather than a bug.)
+2. **Specification search.** The +0.22 was selected as the maximum over 12 combinations (3 feature sets × 4 rebalancing frequencies). Bonferroni-adjusting a nominal p = 0.020 over 12 comparisons gives ≈ 0.24 — not significant. The module's IC p-value is also known to be [anti-conservative in the left tail](#null-test-calibration-please-read).
+3. **Passive holding wins.** Equal-weight buy-and-hold of the same 31 ETFs returns Sharpe **+0.56**, more than double the best strategy, with no model, no signal and no turnover.
+
+**Conclusion**: greater breadth made the signal statistically detectable, and fixing the rebalancing frequency made it non-catastrophic — but it is neither stable across regimes nor competitive with simply holding the basket.
+
+---
+
 ## Project Structure
 
 ```
@@ -813,7 +875,8 @@ chebyshev_wavelet_core/
 │   └── cross_sectional_backtest.m   % Cross-sectional long-short backtesting
 ├── dataio/
 │   ├── load_fx_data.m               % ECB daily FX reference rates
-│   └── load_fx_carry.m              % G10 short rates (carry) via FRED
+│   ├── load_fx_carry.m              % G10 short rates (carry) via FRED
+│   └── load_etf_data.m              % 31 country/sector ETFs via Yahoo
 ├── demos/
 │   └── demo_omi_pom.m               % Demo script (12 sections, see below)
 ├── figures/                         % Figures for README (generated by the demo)
