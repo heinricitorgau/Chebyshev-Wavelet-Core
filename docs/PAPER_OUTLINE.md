@@ -143,7 +143,25 @@ Sanity check: OOS accuracy is 0.5002 ± 0.0009 in all three arms, confirming the
 
 **The honest verdict: a large improvement, not a cure.** Removing replacement moves the accuracy p-distribution from clearly non-uniform (KS p = 0.005) to clean (0.109), and the Sharpe distribution from 0.002 to 0.034 — but 0.034 still fails at α = 0.05. Sampling with replacement was therefore the *dominant* mechanism, not the only one.
 
-**What the residual points to.** The remaining candidate is the number of splice points, the one thing `blockperm` still shares with `block`: circular shift introduces exactly **one** discontinuity into the return sequence, whereas both block methods introduce roughly `n/BlockLen` ≈ 95. This predicts that `blockperm` calibration should improve as block length grows, and is directly testable — the natural next experiment, and one this outline should not pre-empt with a claim.
+**(e) The splice hypothesis, tested and refuted.** The remaining candidate was splice count — the one thing `blockperm` still shares with `block`, since circular shift makes exactly **one** discontinuity while a block method makes roughly `n/BlockLen`. Prediction: `blockperm` calibration should improve monotonically as block length grows, approaching `shift`. Swept at n = 200 × 200 over `BlockLen` ∈ {5, 21, 63, 126, 252, 504} on n = 2000, so splice count ranges over a 133-fold span:
+
+| BlockLen | Splices | KS (Sharpe) | KS p | distinct null Sharpe values |
+|---|---|---|---|---|
+| 5 | 399 | 0.125 | 0.003 | 200.0 |
+| 21 | 95 | 0.100 | 0.034 | 200.0 |
+| 63 | 31 | 0.095 | 0.050 | 200.0 |
+| 126 | 15 | 0.110 | 0.015 | 200.0 |
+| 252 | 7 | 0.105 | 0.023 | 200.0 |
+| 504 | 3 | 0.095 | 0.052 | **24.0** |
+| `shift` | 1 | **0.085** | **0.106** | 189.0 |
+
+**The prediction fails.** Cutting splices from 399 to 3 moves KS only from 0.125 to 0.095, and never reaches `shift`'s 0.085. Excluding the b = 5 point the series is flat — 0.100, 0.095, 0.110, 0.105, 0.095 — with no trend at all. The +0.654 rank correlation against log splice count is carried almost entirely by that single extreme point, and is not evidence of a mechanism. Splice count has at most a weak effect at very high counts; it does not explain the residual.
+
+**Two by-products worth keeping.** First, the diversity collapse predicted for long blocks is confirmed exactly: at BlockLen = 504 the four blocks admit 4! = 24 arrangements, and the measured count of distinct null Sharpe values is **24.0**. But calibration did *not* degrade there (KS 0.095, null sd 0.416 against ~0.44 elsewhere), so the two effects never confounded each other in the middle of the range — the sweep is clean. Second, the residual is **specific to Sharpe**: every `blockperm` variant's *accuracy* p-distribution is uniform (KS p = 0.095–0.185). Whatever is left concerns the scale of the realised return path, not the ordering of predictions.
+
+**Why this is not just noise.** Individually, KS p values of 0.034 or 0.050 at n = 200 are unremarkable. What makes the residual credible is that **all six** block lengths land at KS p ≤ 0.052 while `shift` sits at 0.106. If `blockperm` were properly calibrated, some of six independent configurations should have landed high; none did.
+
+**Status: unresolved, and to be disclosed as such.** Two hypotheses have now been tested — block length (refuted, §3.2c) and splice count (refuted here) — with replacement confirmed as the dominant but incomplete mechanism. A paper that reports two failed explanations alongside the one that worked is more credible than one that reports a tidy single cause, and this is the same disclosure discipline §3.2b applies to the cross-sectional IC left tail.
 
 **Recommendation as it stands.** Use `shift` — it is the only construction clean on both statistics. Use `blockperm` when preserving short-range dependence genuinely matters, reporting the residual Sharpe non-uniformity as a limitation. Do not use `block`. The default remains `block` only for backward compatibility with published results, and the module's documentation now says so.
 
@@ -289,7 +307,7 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 ## 7. Suggested next steps, in priority order
 
 1. ~~Raise the calibration study to 200+ replications.~~ **Done** at n = 250 × 200 (§3.2b).
-2. ~~Block-length sweep; implement and recalibrate a block-permutation null.~~ **Done** (§3.2c–d): block length refuted, replacement confirmed as the dominant mechanism, `blockperm` implemented and measured. It fixes accuracy calibration but leaves Sharpe marginal (KS p = 0.034). **Open:** sweep `blockperm` over block length to test whether the residual is a splice-count effect.
+2. ~~Block-length sweep; block-permutation null; splice-count test.~~ **Done** (§3.2c–e). Three hypotheses tested: block length refuted, splice count refuted, sampling-with-replacement confirmed as dominant but incomplete. `blockperm` fixes accuracy calibration and leaves Sharpe marginal across all six block lengths. **Open and to be disclosed as unresolved:** the Sharpe-specific residual. Use `shift`.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
 4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
 5. **Lean 4: close the two gaps before claiming anything** (§3.0). Formalise the OMI/POM construction, and reconcile the Lean dyadic-cell convention with the MATLAB one. Until both are done the abstract must use the weaker, accurate framing.
