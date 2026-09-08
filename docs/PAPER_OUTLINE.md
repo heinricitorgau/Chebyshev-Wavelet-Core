@@ -61,16 +61,21 @@ Establishes that any empirical failure cannot be attributed to implementation er
 | `cellCoordinate_cellLower/_cellUpper` — the affine map carries each cell onto $[-1,1)$ | Proved |
 | `cell_disjoint`, `support_wavelet_subset`, `wavelet_support_disjoint` | Proved |
 | **`wavelet_orthog_of_cell_ne` — orthogonality across cells** | **Proved** |
-| Orthogonality within a cell | Reduced to `ChebyshevUOrthogonality`, stated as an explicit `Prop` |
+| **`chebyshevU_orthogonality`** — $\int_{-1}^{1} U_i U_j \sqrt{1-x^2}\,dx = \frac{\pi}{2}\delta_{ij}$ | **Proved** (not in Mathlib) |
+| Orthogonality within a cell | Open — needs only the cell-to-$[-1,1]$ change of variables |
 | **OMI and POM** | **Still absent from the formalisation** |
 
   Verified by `#print axioms`: every theorem above depends only on `propext`, `Classical.choice` and `Quot.sound` — no `sorryAx`, so nothing is assumed beyond Lean's standard axioms.
 
   **Gap 1 closed.** The Lean definitions previously used cells $[n/2^k,(n+1)/2^k)$ with a free `scale` parameter while MATLAB uses $[(n-1)/2^{k-1},\,n/2^{k-1})$ with normalisation $2^{k/2}\sqrt{2/\pi}$ — a formalisation of a *different* basis, which proves nothing about the implementation. The Lean side now mirrors MATLAB exactly, writing $J = k-1$ and a zero-based cell index only to avoid truncated `ℕ` subtraction in downstream proofs; the dictionary is stated in the file header.
 
-  **Half of orthogonality is now a theorem.** Cross-cell orthogonality is proved unconditionally: distinct dyadic cells are disjoint, so the product of two wavelets vanishes pointwise and the weighted inner product is the integral of zero. Within-cell orthogonality reduces to
-  $$\int_{-1}^{1} U_i(x)\,U_j(x)\sqrt{1-x^2}\,dx = \tfrac{\pi}{2}\,\delta_{ij},$$
-  which is **not in Mathlib** — its `Chebyshev/Orthogonality.lean` covers the *first*-kind polynomials against $1/\sqrt{1-x^2}$. It is stated as a `Prop` rather than a `sorry`, so the outstanding obligation appears in the statement of every result that depends on it. A route exists: `Polynomial.Chebyshev.U_real_cos` gives $U_n(\cos\theta)\sin\theta = \sin((n+1)\theta)$, so $x=\cos\theta$ turns the integral into $\int_0^\pi \sin((i+1)\theta)\sin((j+1)\theta)\,d\theta$; what remains is the change of variables and sine orthogonality.
+  **Orthogonality is now almost entirely a theorem.** Cross-cell orthogonality is proved unconditionally: distinct dyadic cells are disjoint, so the product of two wavelets vanishes pointwise and the weighted inner product is the integral of zero.
+
+  The analytic half is proved too. The relation
+  $$\int_{-1}^{1} U_i(x)\,U_j(x)\sqrt{1-x^2}\,dx = \tfrac{\pi}{2}\,\delta_{ij}$$
+  is **not in Mathlib** — its `Chebyshev/Orthogonality.lean` covers the *first*-kind polynomials against $1/\sqrt{1-x^2}$ — and was previously carried as an open `Prop`. It is now `chebyshevU_orthogonality`, proved by substituting $x=\cos\theta$: the weight becomes $\sin\theta$, each $U_m(\cos\theta)\sin\theta$ becomes $\sin((m+1)\theta)$ via `Polynomial.Chebyshev.U_real_cos`, and the statement collapses to sine orthogonality on $[0,\pi]$ — itself proved here from the product-to-sum identity. The substitution is taken forward through `integral_deriv_smul_comp` rather than routed through `arccos` as Mathlib's first-kind development does, which is shorter and avoids the endpoint side conditions `arccos` carries.
+
+  One step now separates this from a full orthonormal-basis theorem: the change of variables carrying a dyadic cell onto $[-1,1]$, whose Jacobian $2^{J+1}$ cancels against the normalisation $2^{k/2}\sqrt{2/\pi}$.
 
   **Gap 2 remains open**, and it is the one that matters most: the operational matrices are the paper's actual contribution and are still unformalised.
 
@@ -320,5 +325,5 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 2. ~~Block-length sweep; block-permutation null; splice-count test.~~ **Done** (§3.2c–e). Three hypotheses tested: block length refuted, splice count refuted, sampling-with-replacement confirmed as dominant but incomplete. `blockperm` fixes accuracy calibration and leaves Sharpe marginal across all six block lengths. **Open and to be disclosed as unresolved:** the Sharpe-specific residual. Use `shift`.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
 4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
-5. **Lean 4** (§3.0). Convention gap **closed** — Lean now mirrors the MATLAB basis, and cross-cell orthogonality is proved (`#print axioms` clean). **Open, in order:** prove `ChebyshevUOrthogonality` (route via `U_real_cos` and sine orthogonality), then the within-cell change of variables, then the OMI/POM construction — the last being what the abstract’s strong claim actually needs.
+5. **Lean 4** (§3.0). Convention gap **closed**; cross-cell orthogonality **proved**; `chebyshevU_orthogonality` **proved** — a second-kind relation Mathlib does not carry. **Open, in order:** the cell-to-$[-1,1]$ change of variables completing `WithinCellOrthonormal`, then the OMI/POM construction, the latter being what the abstract’s strong claim actually needs.
 6. ~~Re-examine the daily-horizon signal.~~ **Done** (§3.8): it is short-term reversal, and naive reversal beats the wavelet +2.087 to +1.414. No longer an open question.
