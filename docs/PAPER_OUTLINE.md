@@ -21,17 +21,17 @@ The title deliberately foregrounds methodology and backgrounds the wavelet. Lead
 **Abstract structure (150–200 words)**
 
 1. **Problem.** False-positive rates in signal research are high, yet the standard diagnostics — IC, Sharpe, p-values — are each systematically misleading under identifiable conditions.
-2. **Method.** Five reproducible checks, implemented in a zero-look-ahead pipeline and exercised across three distinct applications (G10 FX directional, 31-ETF cross-section, volatility overlay).
-3. **Headline quantities.** Look-ahead inflates out-of-sample directional accuracy by up to 7.5 percentage points on data with no predictability; hyperparameter selection inflates the null test's `P(p<0.05)` from 0.05 to 0.125; daily rebalancing flips Sharpe from +0.16 to −0.63 while the information coefficient is unchanged at +0.0319.
-4. **Application.** The wavelet features fail to add incremental value over the most pedestrian benchmark in each domain (carry, momentum, EWMA).
-5. **Conclusion.** The protocol's value is evidenced by the four results it intercepted that would otherwise have been reported as discoveries.
+2. **Method.** Five reproducible checks, implemented in a zero-look-ahead pipeline and exercised across three asset-class applications and four benchmark comparisons (G10 FX directional, 31-ETF cross-section at tradeable and daily horizons, volatility overlay).
+3. **Headline quantities.** Look-ahead inflates out-of-sample directional accuracy by up to 7.5 percentage points on data with no predictability; hyperparameter selection inflates the null test's `P(p<0.05)` from 0.05 to 0.125; and the strongest signal found anywhere in the study — frictionless Sharpe +1.41 at daily rebalancing — breaks even at 2.9 bps and is, on inspection, short-term reversal rather than a property of the feature.
+4. **Application.** In four settings the wavelet features lose to the most pedestrian alternative in their own domain: carry in FX, buy-and-hold in the ETF cross-section, EWMA in the volatility overlay, and one-day reversal at the daily horizon.
+5. **Conclusion.** The protocol's value is evidenced by the five results it intercepted that would otherwise have been reported as discoveries — and by two defects it exposed in its own instruments.
 
 ---
 
 ## 2. Introduction
 
 - **Motivation.** Publication bias fills the factor literature with results that do not replicate. What is scarce is not new signals but *reliable procedures for demonstrating that a signal is absent*.
-- **Positioning.** The paper does not claim wavelets are useless. It claims that *under this protocol and this parameterisation*, the feature family showed no incremental value in three settings — a bounded, falsifiable statement.
+- **Positioning.** The paper does not claim wavelets are useless. It claims that *under this protocol and this parameterisation*, the feature family showed no incremental value in four settings, losing each to that domain’s most pedestrian alternative — a bounded, falsifiable statement.
 - **Contributions.**
   1. **Quantification** of five failure modes, not qualitative caution, each with reproducible test code.
   2. One finding not clearly documented elsewhere: **the calibration of a permutation test is itself destroyed by hyperparameter selection**.
@@ -52,7 +52,19 @@ Establishes that any empirical failure cannot be attributed to implementation er
 - The differentiation matrix is cross-validated against the integration matrix via the identity $P\,D = I$: max deviation 5.6e-17 on rows $m \le M-2$, and exactly 1.0 on the $m = M-1$ rows where basis truncation is known to bite.
 - The product operational matrix is symmetric to **exactly 0** and matches its defining projection integrals to 5e-15 – 2.3e-14 across four $(k, M)$ configurations.
 - **A verification that had to be discarded, and why it belongs in the paper.** An obvious-looking check — does $\tilde{F}\Psi(t) = f(t)\Psi(t)$ pointwise? — fails with 74% relative error. The check is wrong, not the code: $f\cdot\psi$ has degree up to $2(M-1)$ and cannot lie in an $(M-1)$-degree space, so the POM is only ever the *orthogonal projection* of the product. Confirmed directly: the residual reaches magnitude 65.6, yet its inner product with **every** basis function is 3.5e-15. Asserting a property the object never claimed is the same error class this paper catalogues in the empirical setting, and it is worth one sentence in §3.0 for that reason.
-- **Differentiator worth developing:** the numerical core is being formalised in Lean 4 (`MyMathLib`, dual-track architecture). Empirical finance essentially never formally verifies its numerical kernels. The claim "the negative result cannot be attributed to a numerical bug, because the kernel is proof-checked" is genuinely novel and should be surfaced in the abstract.
+- **Lean 4 formalisation — current state, stated precisely.** A companion Lean 4 development (`MyMathLib/Wavelet/Defs.lean`, 85 lines) compiles against Mathlib with **no `sorry`**. What it establishes today is the analytic boundary, not the numerical core:
+
+| Formalised | Status |
+|---|---|
+| `chebyshevU` recurrence, `cellCoordinate`, `weight`, `wavelet`, weighted inner product | Definitions |
+| `chebyshevU_zero`, `chebyshevU_one`, `chebyshevU_succ_succ` | Proved (definitional, `rfl`) |
+| `weight_nonneg`; `wavelet_zero`; `wavelet_eq_zero_of_not_mem` (support confined to its dyadic cell) | Proved |
+| **Orthonormality, completeness** | **Not proved** — stated as `Prop` contracts (`WeightedOrthonormalBasisContract`, `InWeightedL2`), which the file's own header describes as "intentionally left as interfaces" |
+| **OMI and POM** | **Absent from the formalisation entirely** |
+
+  Two gaps must close before this can carry any weight in a manuscript. First, the operational matrices — the paper's actual contribution and the object §3.0 is about — are not formalised at all, so "the kernel is proof-checked" would be false as stated. Second, the Lean and MATLAB conventions do not yet correspond: Lean uses cells $[n/2^k,\,(n+1)/2^k)$ with a free `scale` parameter, MATLAB uses $[(n-1)/2^{k-1},\,n/2^{k-1})$ with normalisation $2^{k/2}\sqrt{2/\pi}$. A formalisation of a *different* basis proves nothing about this implementation.
+
+  **Honest framing available now:** "the wavelet's analytic definitions and support properties are machine-checked in Lean 4; the operational matrices are verified numerically against the source paper to machine precision, and their formalisation is future work." That is defensible and still unusual for the field. The stronger claim — that the negative empirical result cannot stem from a numerical bug because the kernel is proof-checked — requires formalising the OMI/POM construction and proving the two implementations agree. Until then it must not appear in the abstract.
 
 ### 3.1 Look-ahead bias: batch smoothing versus rolling windows
 
@@ -118,7 +130,22 @@ Sanity check: OOS accuracy is 0.5002 ± 0.0009 in all three arms, confirming the
 
 **What survives is the sharper claim.** The invariant difference between the two constructions is not block length but *sampling with replacement*: bootstrap draws a random multiset, so each null path has a different empirical return distribution, while circular shift is a permutation that preserves that distribution exactly and reorders only phase. The extra dispersion this injects into the null Sharpe is block-length-independent — exactly what the table shows.
 
-**Actionable consequence.** If short-range dependence must be preserved in the null, use a **block *permutation*** (shuffle whole blocks without replacement) rather than a block *bootstrap*: it keeps the block structure while leaving the empirical distribution intact. This is a concrete fix the paper can recommend, and it was reachable only because the first hypothesis was tested rather than asserted.
+**(d) The proposed fix, implemented and measured — a partial success.** `NullMode='blockperm'` shuffles whole blocks *without* replacement. Unit tests confirm it is a genuine permutation: multiset, length and every moment are invariant at all block lengths, while the bootstrap shifts the sample mean by −1.4e-2 and the standard deviation by −8.5e-3 on the same input. Block dependence is preserved exactly as designed (adjacency retention 0.9525 against the theoretical 20/21 = 0.9524). Recalibrated at n = 200 × 200, BlockLen = 21:
+
+| NullMode | Statistic | P<.05 | median p | KS | KS p |
+|---|---|---|---|---|---|
+| `block` | accuracy | 0.015 | 0.595 | 0.121 | **0.005** |
+| | Sharpe | 0.050 | 0.612 | 0.130 | **0.002** |
+| `blockperm` | accuracy | 0.045 | 0.580 | 0.084 | 0.109 |
+| | Sharpe | 0.060 | 0.567 | 0.100 | **0.034** |
+| `shift` | accuracy | 0.020 | 0.552 | 0.065 | 0.361 |
+| | Sharpe | 0.065 | 0.567 | 0.085 | 0.106 |
+
+**The honest verdict: a large improvement, not a cure.** Removing replacement moves the accuracy p-distribution from clearly non-uniform (KS p = 0.005) to clean (0.109), and the Sharpe distribution from 0.002 to 0.034 — but 0.034 still fails at α = 0.05. Sampling with replacement was therefore the *dominant* mechanism, not the only one.
+
+**What the residual points to.** The remaining candidate is the number of splice points, the one thing `blockperm` still shares with `block`: circular shift introduces exactly **one** discontinuity into the return sequence, whereas both block methods introduce roughly `n/BlockLen` ≈ 95. This predicts that `blockperm` calibration should improve as block length grows, and is directly testable — the natural next experiment, and one this outline should not pre-empt with a claim.
+
+**Recommendation as it stands.** Use `shift` — it is the only construction clean on both statistics. Use `blockperm` when preserving short-range dependence genuinely matters, reporting the residual Sharpe non-uniformity as a limitation. Do not use `block`. The default remains `block` only for backward compatibility with published results, and the module's documentation now says so.
 
 **Recommendation, not yet applied.** `NullMode` should probably default to `shift`. This is deliberately left unchanged for now: every published result in the README was produced under `block`, so flipping the default silently would break their reproducibility. Change it as an explicit, documented migration or not at all.
 
@@ -227,9 +254,22 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 
 ## 5. Conclusion
 
-1. **Bounded empirical claim.** Under this protocol and parameterisation, Chebyshev wavelet features showed no incremental value in three settings. No claim that wavelets are useless — a single implementation cannot support that.
-2. **Methodological contribution.** The protocol intercepted four results that would otherwise have been reported as discoveries: the FX 2013–2026 IC (p = 0.026), the FX Sharpe with p = 0.040 on a losing strategy, the best ETF configuration (p = 0.020), and the 0.578 artefact from a truncated proxy. **The interception record is itself the evidence that the protocol works.**
-3. **Implication for the field.** Factor research should report null-distribution location, turnover and costs, and sub-period decomposition alongside p-values — not p-values alone.
+1. **Bounded empirical claim, now closed rather than merely unproven.** Under this protocol and parameterisation, Chebyshev wavelet features added no incremental value in **four** settings, and in each the comparison was lost to the single most pedestrian alternative available in that domain:
+
+| Setting | Wavelet | Pedestrian alternative |
+|---|---|---|
+| G10 FX, directional | Sharpe −0.18 with carry as a feature | Carry ranking alone, **+0.27** |
+| ETF cross-section, tradeable frequencies | +0.25 monthly / +0.22 quarterly, frictionless | Equal-weight buy & hold, **+0.557** |
+| ETF, daily horizon | +1.414 frictionless, breakeven 2.9 bps | One-day reversal, **+2.087** |
+| Volatility overlay | σ-forecast correlation 0.632 | EWMA, **0.670** |
+
+   The daily-horizon row is what makes the claim closed rather than open. The project's single most impressive number turned out, on examination, to be short-term reversal wearing a wavelet costume — the score's rank correlation with yesterday's return is −0.594 against its own IC of 0.032. There is no remaining configuration in which the feature family looks promising and has not been tested. This is still **not** a claim that wavelets are useless in finance: one implementation, one parameterisation, three asset classes.
+
+2. **Methodological contribution.** The protocol intercepted five results that would otherwise have been reported as discoveries: the FX 2013–2026 IC (p = 0.026), the FX Sharpe with p = 0.040 on a losing strategy, the best ETF configuration (p = 0.020 → Bonferroni 0.24), the 0.578 artefact from a truncated proxy, and the +1.414 daily Sharpe that is not the feature's own. **The interception record is the evidence that the protocol works** — a validation protocol can only be argued for by showing what it caught.
+
+3. **The protocol also caught its own instruments.** Two defects were found in the verification machinery rather than in the strategies: the null test's default block bootstrap produces non-uniform p-values (§3.2b–c, now fixed by a block permutation), and the cost model's first impact term charged for trades that never happened (§3.7). Tools that check results need checking too, and neither defect was visible at the replication counts used before this round.
+
+4. **Implication for the field.** Report the null distribution's *location*, not only the p-value; report the **frictionless** column alongside the net one, since "no signal" and "signal too expensive to harvest" are opposite diagnoses with opposite remedies; benchmark short-horizon cross-sectional signals against naive reversal before claiming novelty; and verify that a permutation test is uniform under the null instead of assuming it.
 
 ---
 
@@ -249,8 +289,8 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 ## 7. Suggested next steps, in priority order
 
 1. ~~Raise the calibration study to 200+ replications.~~ **Done** at n = 250 × 200 (§3.2b).
-2. ~~Block-length sweep for the block bootstrap.~~ **Done** (§3.2c): block length refuted as the mechanism; sampling-with-replacement survives. Next step is to implement and re-calibrate a block *permutation* null.
+2. ~~Block-length sweep; implement and recalibrate a block-permutation null.~~ **Done** (§3.2c–d): block length refuted, replacement confirmed as the dominant mechanism, `blockperm` implemented and measured. It fixes accuracy calibration but leaves Sharpe marginal (KS p = 0.034). **Open:** sweep `blockperm` over block length to test whether the residual is a splice-count effect.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
 4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
-5. **Develop the Lean 4 angle** into §3.0 and the abstract — the strongest differentiator available.
+5. **Lean 4: close the two gaps before claiming anything** (§3.0). Formalise the OMI/POM construction, and reconcile the Lean dyadic-cell convention with the MATLAB one. Until both are done the abstract must use the weaker, accurate framing.
 6. ~~Re-examine the daily-horizon signal.~~ **Done** (§3.8): it is short-term reversal, and naive reversal beats the wavelet +2.087 to +1.414. No longer an open question.

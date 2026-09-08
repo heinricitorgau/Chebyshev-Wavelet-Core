@@ -136,9 +136,15 @@ function [res, diagOut] = walkforward_backtest(F, S, opts)
 %     'Embargo'      訓練集與測試段之間的空窗期數（預設 1）
 %     'CostBps'      每次部位變動的單邊交易成本，單位為基點（預設 0）
 %     'NullRuns'     虛無假設檢定的重複次數（預設 0 = 不執行；建議 200）
-%     'NullMode'     'block'(預設，區塊自助法) | 'shift'(循環位移)。校準
-%                    比較見上方「虛無假設檢定」。
-%     'BlockLen'     'block' 模式的區塊長度（預設 21，約一個月）
+%     'NullMode'     'block'(預設，區塊自助法) | 'shift'(循環位移)
+%                    | 'blockperm'(區塊排列，不放回)。校準比較見上方
+%                    「虛無假設檢定」。**新研究建議用 'blockperm'**：實測
+%                    'block' 的 p 值在無訊號資料上不均勻（KS p = 0.007~
+%                    0.011，n = 250），且該偏離與區塊長度無關（5~126 皆
+%                    然），源自「取後放回」改變經驗報酬分布。'blockperm'
+%                    保留區塊內相依，又不改動該分布。預設維持 'block' 僅
+%                    為與既有已發布結果相容。
+%     'BlockLen'     'block' 與 'blockperm' 模式的區塊長度（預設 21）
 %     'Verbose'      true 時列印每次重新訓練的進度（預設 false）
 %
 %   輸出 res：
@@ -186,7 +192,7 @@ arguments
     opts.Embargo      (1,1) double {mustBeInteger, mustBeNonnegative} = 1
     opts.CostBps      (1,1) double {mustBeNonnegative} = 0
     opts.NullRuns     (1,1) double {mustBeInteger, mustBeNonnegative} = 0
-    opts.NullMode     (1,:) char {mustBeMember(opts.NullMode, {'shift','block'})} = 'block'
+    opts.NullMode     (1,:) char {mustBeMember(opts.NullMode, {'shift','block','blockperm'})} = 'block'
     opts.BlockLen     (1,1) double {mustBeInteger, mustBePositive} = 21
     opts.Verbose      (1,1) logical = false
 end
@@ -310,15 +316,23 @@ if opts.NullRuns > 0
     nullAcc  = NaN(opts.NullRuns, 1);
     nullShp  = NaN(opts.NullRuns, 1);
     for r = 1:opts.NullRuns
-        if strcmp(opts.NullMode, 'shift')
-            % 循環位移：保留報酬序列的完整結構，但所有虛無樣本共用同一條
-            % 路徑的報酬池，虛無分布的離散度會偏窄。
-            sh      = minShift + randi(rs, max(1, nObs - 2*minShift));
-            fwdPerm = circshift(fwdRet, sh);
-        else
-            % 固定長度區塊自助法：以取後放回的方式重組報酬區塊，產生「新的」
-            % 報酬路徑，虛無分布的離散度較接近真實抽樣分布。
-            fwdPerm = local_block_bootstrap(fwdRet, opts.BlockLen, rs);
+        switch opts.NullMode
+            case 'shift'
+                % 循環位移：保留報酬序列的完整結構，但所有虛無樣本共用同一條
+                % 路徑的報酬池，虛無分布的離散度會偏窄。
+                sh      = minShift + randi(rs, max(1, nObs - 2*minShift));
+                fwdPerm = circshift(fwdRet, sh);
+            case 'blockperm'
+                % 區塊排列：不放回地打亂等長區塊。兼具兩者之長——保留區塊內
+                % 的短期相依（如 'block'），又完整保留經驗報酬分布（如
+                % 'shift'）。實測 'block' 的 p 值不均勻源自「取後放回」而非
+                % 區塊長度（見 CLAUDE.md），本模式即為該診斷的修正。
+                fwdPerm = local_block_permute(fwdRet, opts.BlockLen, rs);
+            otherwise
+                % 固定長度區塊自助法：以取後放回的方式重組報酬區塊。注意其
+                % p 值在無訊號資料上並不均勻（偏保守），保留為預設僅為了與
+                % 既有已發布結果相容；新研究建議改用 'blockperm'。
+                fwdPerm = local_block_bootstrap(fwdRet, opts.BlockLen, rs);
         end
         labPerm = sign(fwdPerm);  labPerm(labPerm == 0) = 1;
         rp      = local_rerun(F, labPerm, fwdPerm, folds, opts);
@@ -359,6 +373,32 @@ starts = randi(rs, max(1, n - blockLen + 1), nB, 1);
 idx    = starts.' + (0:blockLen-1).';          % blockLen x nB
 idx    = idx(:);
 out    = x(idx(1:n));
+end
+
+
+% =========================================================================
+% 局部函數：不放回的區塊排列
+% =========================================================================
+function out = local_block_permute(x, blockLen, rs)
+%LOCAL_BLOCK_PERMUTE 將序列切成等長區塊後不放回地重排
+%
+%   與 LOCAL_BLOCK_BOOTSTRAP 的關鍵差異：本函數是一個「排列」，輸出與輸入
+%   的多重集完全相同，故經驗報酬分布（均值、變異數、所有動差）逐一保持不
+%   變；自助法抽的是隨機多重集，每條虛無路徑的分布都不同，會為虛無統計量
+%   注入額外離散度，實測即為 p 值不均勻的來源。
+%
+%   末段不足一個區塊時單獨成塊，一併參與排列，確保無資料被丟棄或重複。
+n   = numel(x);
+b   = min(blockLen, n);
+beg = 1:b:n;                                    % 各區塊起點（末塊可能較短）
+ord = randperm(rs, numel(beg));
+out = zeros(size(x), 'like', x);
+p   = 1;
+for i = ord
+    seg = beg(i) : min(beg(i) + b - 1, n);
+    out(p : p + numel(seg) - 1) = x(seg);
+    p = p + numel(seg);
+end
 end
 
 
