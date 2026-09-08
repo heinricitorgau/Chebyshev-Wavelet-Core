@@ -727,7 +727,8 @@ class TestSandboxIntegration:
     def _run(tmp_path: Path, *extra: str) -> tuple[int, list[dict]]:
         log_path = tmp_path / "decisions.jsonl"
         code = run_sandbox.main(
-            ["--cycles", "10", "--log-path", str(log_path), "--config", str(REPO_ROOT / "config.json"), *extra]
+            ["--cycles", "10", "--source", "synthetic", "--log-path", str(log_path),
+             "--config", str(REPO_ROOT / "config.json"), *extra]
         )
         records = list(DataStore(log_path).replay()) if log_path.exists() else []
         return code, records
@@ -773,12 +774,159 @@ class TestSandboxIntegration:
         raw["system"]["submit_orders"] = True
         path = tmp_path / "live.json"
         path.write_text(json.dumps(raw), encoding="utf-8")
-        assert run_sandbox.main(["--config", str(path), "--cycles", "1"]) == 2
+        assert run_sandbox.main(["--config", str(path), "--cycles", "1", "--source", "synthetic"]) == 2
 
     @pytest.mark.parametrize("extra", [["--symbols", "2330"], ["--cycles", "0"]])
     def test_invalid_arguments_exit_with_code_two(self, tmp_path: Path, extra: list[str]) -> None:
         code = run_sandbox.main(
-            ["--config", str(REPO_ROOT / "config.json"),
+            ["--config", str(REPO_ROOT / "config.json"), "--source", "synthetic",
              "--log-path", str(tmp_path / "d.jsonl"), *extra]
         )
         assert code == 2
+
+
+# =====================================================================
+# IB data path (socket stubbed; everything downstream of it is real)
+# =====================================================================
+
+
+class _StubBar:
+    def __init__(self, date, close: float) -> None:
+        self.date = date
+        self.open = self.high = self.low = self.close = close
+        self.volume = 1_000.0
+
+
+class _StubIB:
+    """Minimal stand-in for ``ib_insync.IB`` covering the adapter's calls.
+
+    Injecting this exercises contract handling, bar parsing, timestamp
+    alignment and the replay walk without a broker.  It does not substitute for
+    a live session: the socket, pacing limits and contract qualification are
+    only proved against real TWS.
+    """
+
+    def __init__(self, series: dict[str, dict[str, float]]) -> None:
+        self._series = series
+        self._connected = False
+        self.requests: list[str] = []
+
+    def isConnected(self) -> bool:  # noqa: N802 - ib_insync's spelling
+        return self._connected
+
+    async def connectAsync(self, host, port, clientId):  # noqa: N802, ANN001
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def cancelRealTimeBars(self, bars) -> None:  # noqa: N802, ANN001
+        pass
+
+    async def reqHistoricalDataAsync(self, contract, **kwargs):  # noqa: N802, ANN001
+        symbol = getattr(contract, "symbol", str(contract))
+        self.requests.append(symbol)
+        return [_StubBar(date, close) for date, close in self._series[symbol].items()]
+
+
+class TestIBDataPath:
+    @staticmethod
+    def _series() -> dict[str, dict[str, float]]:
+        days = [f"2026-08-{day:02d}" for day in range(1, 21)]
+        spy = {day: 500.0 + index for index, day in enumerate(days)}
+        qqq = {day: 430.0 + index * 1.5 for index, day in enumerate(days)}
+        # IWM is missing one session, so alignment has real work to do.
+        iwm = {day: 210.0 + index * 0.5 for index, day in enumerate(days) if day != "2026-08-05"}
+        return {"SPY": spy, "QQQ": qqq, "IWM": iwm}
+
+    def test_history_is_intersected_not_forward_filled(self) -> None:
+        """A missing session must shrink the panel, never be padded.
+
+        Carrying the previous close into a session the venue never printed
+        fabricates a price and biases every indicator that reads it.
+        """
+        from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
+
+        stub = _StubIB(self._series())
+        adapter = IBPaperAdapter(port=7497, paper_only=True, ib_client=stub)
+
+        async def scenario():
+            await adapter.connect()
+            return await run_sandbox.fetch_ib_history(
+                adapter, ["SPY", "QQQ", "IWM"], "20 D", "1 day", True
+            )
+
+        stamps, prices = asyncio.run(scenario())
+        assert prices.shape == (19, 3), "the session absent from IWM must be dropped"
+        assert "2026-08-05" not in [str(stamp) for stamp in stamps]
+        assert stub.requests == ["SPY", "QQQ", "IWM"]
+
+    def test_replay_market_only_exposes_bars_up_to_the_cursor(self) -> None:
+        prices = np.arange(60.0, dtype=float).reshape(20, 3) + 100.0
+        market = run_sandbox.ReplayMarket(["A", "B", "C"], prices, warmup=10)
+        first = market.advance()
+        assert first.shape == (11, 3)
+        assert np.array_equal(first, prices[:11])
+        second = market.advance()
+        assert second.shape == (12, 3)
+        assert np.array_equal(second[:11], first), "history must not be rewritten"
+
+    def test_replay_market_refuses_to_run_past_the_data(self) -> None:
+        prices = np.ones((12, 2))
+        market = run_sandbox.ReplayMarket(["A", "B"], prices, warmup=10)
+        market.advance()
+        market.advance()
+        with pytest.raises(IndexError):
+            market.advance()
+
+    def test_replay_market_rejects_insufficient_history(self) -> None:
+        with pytest.raises(ValueError):
+            run_sandbox.ReplayMarket(["A"], np.ones((5, 1)), warmup=10)
+
+    def test_adapter_refuses_a_non_paper_port(self) -> None:
+        from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
+
+        with pytest.raises(ValueError, match="Paper Trading port"):
+            IBPaperAdapter(port=7496, paper_only=True, ib_client=_StubIB({}))
+
+    def test_full_decision_loop_over_stubbed_ib_bars(self, tmp_path: Path) -> None:
+        """Run the real decision path over IB-shaped bars, end to end."""
+        from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
+
+        stub = _StubIB(self._series())
+        adapter = IBPaperAdapter(port=7497, paper_only=True, ib_client=stub)
+
+        async def scenario():
+            await adapter.connect()
+            _, prices = await run_sandbox.fetch_ib_history(
+                adapter, ["SPY", "QQQ", "IWM"], "20 D", "1 day", True
+            )
+            await adapter.disconnect()
+            return prices
+
+        prices = asyncio.run(scenario())
+        assert not adapter.is_connected
+
+        config = load_config(REPO_ROOT / "config.json")
+        market = run_sandbox.ReplayMarket(["SPY", "QQQ", "IWM"], prices, warmup=15)
+        store = DataStore(tmp_path / "ib.jsonl")
+        state = run_sandbox.SandboxState(
+            strategy_equity=[1.0], previous_weights=np.zeros(3), entry_prices={}, held=np.zeros(3)
+        )
+        account = run_sandbox.SandboxAccount(1_000_000.0, 0.0, 0.0)
+
+        async def loop():
+            for cycle in range(1, market.remaining + 1):
+                await run_sandbox.run_cycle(
+                    cycle, market,
+                    ExtendedSignalAnalyzer(2, 5, support_resistance_window=3),
+                    RiskManager(RiskConfig(**dict(config.risk))),
+                    PreTradeCostGuard(),
+                    store, config, account, state,
+                )
+
+        asyncio.run(loop())
+        records = list(store.replay())
+        assert records, "the loop must persist at least one decision"
+        assert all(record["submitted"] is False for record in records)
+        assert not [r for r in records if r["total_shares"] > 0 and not r["approved"]]

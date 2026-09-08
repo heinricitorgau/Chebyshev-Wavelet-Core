@@ -1,9 +1,14 @@
-"""Self-contained paper-trading decision sandbox.
+"""Paper-trading decision sandbox with live IB or synthetic market data.
 
 The sandbox exercises the full decision path -- configuration, causal signals,
-risk layers, Taiwan board-lot sizing, T+2 settlement, and durable logging --
-against deterministic synthetic market data.  It never opens a broker
-connection and never submits an order, so it can run unattended in CI.
+risk layers, board-lot sizing, T+2 settlement, and durable logging -- and never
+submits an order under either data source.
+
+``--source ib`` connects to a local TWS or IB Gateway Paper Trading session on
+port 7497, downloads completed historical bars, and walks forward through them
+one bar per cycle so the causal guarantees still hold.  ``--source synthetic``
+uses deterministic generated prices and needs no broker, which keeps the run
+available in CI.
 
 Two invariants are enforced before any work begins and are not configurable
 from the command line: ``paper_only`` must be true and ``submit_orders`` must
@@ -33,6 +38,11 @@ from chebyshev_wavelet_py.config_loader import ConfigLoader, ConfigurationError,
 from chebyshev_wavelet_py.data_store import DataStore
 from chebyshev_wavelet_py.execution_guard import CostGuardConfig, PreTradeCostGuard
 from chebyshev_wavelet_py.extended_signals import ExtendedSignalAnalyzer
+from chebyshev_wavelet_py.ib_adapter import (
+    IBConnectionError,
+    IBDependencyError,
+    IBPaperAdapter,
+)
 from chebyshev_wavelet_py.risk_manager import RiskConfig, RiskManager
 
 
@@ -84,6 +94,17 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--settled-cash", type=float, default=3_000_000.0, help="Opening TWD cash.")
     parser.add_argument("--log-path", default=None, help="Override the decision log path.")
     parser.add_argument("--interval", type=float, default=0.0, help="Seconds to wait per cycle.")
+    parser.add_argument(
+        "--source",
+        choices=("ib", "synthetic"),
+        default="ib",
+        help="Market data source: a live IB Paper Trading session, or generated prices.",
+    )
+    parser.add_argument("--host", default=None, help="TWS/IB Gateway host (default from config).")
+    parser.add_argument("--client-id", type=int, default=None, help="IB API client id.")
+    parser.add_argument("--ib-duration", default=None, help="IB history duration, e.g. '180 D'.")
+    parser.add_argument("--ib-bar-size", default=None, help="IB bar size, e.g. '1 day'.")
+    parser.add_argument("--connect-timeout", type=float, default=10.0, help="IB connect timeout.")
     return parser.parse_args(argv)
 
 
@@ -132,6 +153,75 @@ class SyntheticMarket:
         """Append one new bar and return the complete history."""
         self.prices = np.vstack([self.prices, self.prices[-1] * np.exp(self._draw(1))[0]])
         return self.prices
+
+
+class ReplayMarket:
+    """Walk forward through a fixed matrix of real closes, one bar per cycle.
+
+    Only the prefix up to the current cursor is ever exposed, so an indicator
+    cannot see a bar the simulated clock has not reached.  This is the same
+    guarantee the synthetic source provides, applied to recorded history.
+    """
+
+    def __init__(self, symbols: Sequence[str], prices: np.ndarray, warmup: int) -> None:
+        if prices.ndim != 2 or prices.shape[0] < warmup + 1:
+            raise ValueError("replay history is shorter than the requested warm-up")
+        self.symbols = tuple(symbols)
+        self._prices = prices
+        self._cursor = warmup
+
+    @property
+    def remaining(self) -> int:
+        return self._prices.shape[0] - self._cursor
+
+    def advance(self) -> np.ndarray:
+        if self.remaining <= 0:
+            raise IndexError("replay history exhausted")
+        self._cursor += 1
+        return self._prices[: self._cursor]
+
+
+async def fetch_ib_history(
+    adapter: IBPaperAdapter,
+    symbols: Sequence[str],
+    duration: str,
+    bar_size: str,
+    use_rth: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Download closes for each symbol and align them on shared timestamps.
+
+    Symbols are intersected on timestamp rather than forward-filled.  Padding a
+    missing bar with the previous close would fabricate a price the venue never
+    printed and quietly bias every indicator that reads it.
+    """
+    from ib_insync import Stock
+
+    per_symbol: dict[str, dict[Any, float]] = {}
+    stamps: set[Any] | None = None
+    for symbol in symbols:
+        bars = await adapter.historical_bars(
+            Stock(symbol, "SMART", "USD"),
+            duration=duration,
+            bar_size=bar_size,
+            what_to_show="TRADES",
+            use_rth=use_rth,
+        )
+        mapping = {
+            stamp: float(close)
+            for stamp, close in zip(bars.timestamp.tolist(), bars.close.tolist())
+            if np.isfinite(close) and close > 0.0
+        }
+        LOGGER.info("  %-6s %d bars from IB", symbol, len(mapping))
+        per_symbol[symbol] = mapping
+        stamps = set(mapping) if stamps is None else (stamps & set(mapping))
+
+    if not stamps:
+        raise RuntimeError("IB history has no timestamps common to every symbol")
+    ordered = sorted(stamps)
+    matrix = np.array(
+        [[per_symbol[symbol][stamp] for symbol in symbols] for stamp in ordered], dtype=float
+    )
+    return np.asarray(ordered, dtype=object), matrix
 
 
 def simple_returns(prices: np.ndarray) -> np.ndarray:
@@ -296,12 +386,36 @@ async def async_main(arguments: argparse.Namespace) -> int:
     log_path = arguments.log_path or config.data_store.get("path", "logs/decisions.jsonl")
 
     LOGGER.info(
-        "sandbox starting: paper_only=%s submit_orders=%s symbols=%s cycles=%d",
-        config.system.paper_only, config.system.submit_orders, ",".join(symbols), arguments.cycles,
+        "sandbox starting: source=%s paper_only=%s submit_orders=%s symbols=%s cycles=%d",
+        arguments.source, config.system.paper_only, config.system.submit_orders,
+        ",".join(symbols), arguments.cycles,
     )
     LOGGER.info("decision log: %s", log_path)
 
-    market = SyntheticMarket(symbols, arguments.history, arguments.seed)
+    adapter: IBPaperAdapter | None = None
+    market: SyntheticMarket | ReplayMarket
+    try:
+        if arguments.source == "ib":
+            market, adapter, cycles = await _build_ib_market(arguments, config, symbols)
+        else:
+            market = SyntheticMarket(symbols, arguments.history, arguments.seed)
+            cycles = arguments.cycles
+    except IBDependencyError as exc:
+        LOGGER.error("IB support unavailable: %s", exc)
+        return 2
+    except IBConnectionError as exc:
+        LOGGER.error(
+            "could not reach IB Paper Trading: %s. Start TWS or IB Gateway, enable "
+            "'ActiveX and Socket Clients' under API settings, and confirm the paper "
+            "session listens on port %d. Re-run with --source synthetic to exercise "
+            "the decision path without a broker.",
+            exc, config.system.port,
+        )
+        return 3
+    except Exception as exc:
+        LOGGER.error("market data preparation failed: %s", exc)
+        return 1
+
     analyzer = ExtendedSignalAnalyzer(
         fast_window=indicators.sma_fast_window,
         slow_window=indicators.sma_slow_window,
@@ -328,13 +442,21 @@ async def async_main(arguments: argparse.Namespace) -> int:
     )
 
     written = 0
-    for cycle in range(1, arguments.cycles + 1):
-        records = await run_cycle(
-            cycle, market, analyzer, risk_manager, cost_guard, store, config, account, state
-        )
-        written += len(records)
-        if arguments.interval > 0.0:
-            await asyncio.sleep(arguments.interval)
+    try:
+        for cycle in range(1, cycles + 1):
+            records = await run_cycle(
+                cycle, market, analyzer, risk_manager, cost_guard, store, config, account, state
+            )
+            written += len(records)
+            if arguments.interval > 0.0:
+                await asyncio.sleep(arguments.interval)
+    finally:
+        if adapter is not None:
+            try:
+                await adapter.disconnect()
+                LOGGER.info("IB Paper Trading session disconnected")
+            except Exception:
+                LOGGER.exception("error while disconnecting from IB")
 
     replayed = list(store.replay())
     from_this_run = [record for record in replayed if "cycle" in record]
@@ -357,6 +479,53 @@ async def async_main(arguments: argparse.Namespace) -> int:
     )
     LOGGER.info("sandbox complete; no order was submitted at any point")
     return 0
+
+
+async def _build_ib_market(
+    arguments: argparse.Namespace, config: SystemConfig, symbols: list[str]
+) -> tuple[ReplayMarket, IBPaperAdapter, int]:
+    """Connect to Paper Trading, download history, and prepare the replay.
+
+    The adapter is constructed with ``paper_only=True`` and the configured port,
+    so a non-paper port is refused by the adapter before any socket is opened.
+    """
+    orchestration = config.orchestration
+    duration = arguments.ib_duration or str(orchestration.get("history_duration", "180 D"))
+    bar_size = arguments.ib_bar_size or str(orchestration.get("bar_size", "1 day"))
+    use_rth = bool(orchestration.get("use_rth", True))
+    host = arguments.host or config.system.host
+    client_id = arguments.client_id if arguments.client_id is not None else config.system.client_id
+
+    adapter = IBPaperAdapter(
+        host=host,
+        port=config.system.port,
+        client_id=client_id,
+        account=config.system.account,
+        paper_only=True,
+    )
+    LOGGER.info("connecting to IB Paper Trading at %s:%d (client id %d)", host, config.system.port, client_id)
+    await adapter.connect(timeout=arguments.connect_timeout)
+    LOGGER.info("connection established; requesting %s of %s bars", duration, bar_size)
+
+    try:
+        stamps, prices = await fetch_ib_history(adapter, symbols, duration, bar_size, use_rth)
+    except Exception:
+        await adapter.disconnect()
+        raise
+
+    warmup = min(arguments.history, max(2, prices.shape[0] - 1))
+    available = prices.shape[0] - warmup
+    cycles = max(1, min(arguments.cycles, available))
+    if cycles < arguments.cycles:
+        LOGGER.warning(
+            "history supports %d cycles after a %d-bar warm-up; reducing from %d",
+            cycles, warmup, arguments.cycles,
+        )
+    LOGGER.info(
+        "aligned %d common bars across %d symbols (%s .. %s)",
+        prices.shape[0], len(symbols), stamps[0], stamps[-1],
+    )
+    return ReplayMarket(symbols, prices, warmup), adapter, cycles
 
 
 def _finite(value: float) -> float | None:
