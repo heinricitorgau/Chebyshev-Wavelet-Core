@@ -49,7 +49,9 @@ Establishes that any empirical failure cannot be attributed to implementation er
 
 - Operational matrices verified element-wise against the source paper's Eq. (4.9): **maximum deviation 0**.
 - Orthonormality 3.36e-16; integration exactness 1.11e-16 for untruncated rows.
-- The differentiation matrix is cross-validated against the integration matrix via the identity $P\,D = I$, exact to machine precision on all rows except those where the basis truncation is known to bite.
+- The differentiation matrix is cross-validated against the integration matrix via the identity $P\,D = I$: max deviation 5.6e-17 on rows $m \le M-2$, and exactly 1.0 on the $m = M-1$ rows where basis truncation is known to bite.
+- The product operational matrix is symmetric to **exactly 0** and matches its defining projection integrals to 5e-15 – 2.3e-14 across four $(k, M)$ configurations.
+- **A verification that had to be discarded, and why it belongs in the paper.** An obvious-looking check — does $\tilde{F}\Psi(t) = f(t)\Psi(t)$ pointwise? — fails with 74% relative error. The check is wrong, not the code: $f\cdot\psi$ has degree up to $2(M-1)$ and cannot lie in an $(M-1)$-degree space, so the POM is only ever the *orthogonal projection* of the product. Confirmed directly: the residual reaches magnitude 65.6, yet its inner product with **every** basis function is 3.5e-15. Asserting a property the object never claimed is the same error class this paper catalogues in the empirical setting, and it is worth one sentence in §3.0 for that reason.
 - **Differentiator worth developing:** the numerical core is being formalised in Lean 4 (`MyMathLib`, dual-track architecture). Empirical finance essentially never formally verifies its numerical kernels. The claim "the negative result cannot be attributed to a numerical bug, because the kernel is proof-checked" is genuinely novel and should be surfaced in the abstract.
 
 ### 3.1 Look-ahead bias: batch smoothing versus rolling windows
@@ -102,7 +104,21 @@ Sanity check: OOS accuracy is 0.5002 ± 0.0009 in all three arms, confirming the
 
 **Direction matters, and here it is benign but disqualifying.** A right-shifted p is *conservative*: the test under-rejects, so no false discovery in this repository was manufactured by it. But a null distribution that is not uniform under the null is not a valid reference distribution, and a referee is entitled to say so. Note this is the **opposite direction** from the cross-sectional IC problem in the disclosure below — over-rejection there, under-rejection here. They are two distinct defects and the paper must not conflate them.
 
-**Hypothesised mechanism (stated as untested).** Block bootstrap resamples returns *with replacement*, so each null path has its own realised variance; the observed Sharpe is then compared against nulls whose denominators are drawn from a wider distribution. Circular shift permutes phase only, preserving the return distribution and autocorrelation function exactly. This predicts the defect should scale with block length — a cheap experiment, and one a referee will ask for.
+**(c) Mechanism: hypothesis tested and refined (n = 200 × 200 null draws).** The original hypothesis was that block bootstrap resamples *with replacement*, giving each null path its own realised variance, and that the defect should therefore **scale with block length**. A sweep over `BlockLen` ∈ {5, 21, 63, 126} with circular shift as control:
+
+| Null construction | P<.05 (Sharpe) | median p | KS | KS p |
+|---|---|---|---|---|
+| block, BlockLen = 5 | 0.035 | 0.590 | 0.145 | **0.000** |
+| block, BlockLen = 21 | 0.050 | 0.612 | 0.130 | **0.002** |
+| block, BlockLen = 63 | 0.045 | 0.604 | 0.145 | **0.000** |
+| block, BlockLen = 126 | 0.055 | 0.617 | 0.145 | **0.000** |
+| shift (control) | 0.065 | 0.567 | 0.085 | 0.106 |
+
+**The block-length half of the hypothesis is refuted.** The defect is present at full strength at *every* block length, including BlockLen = 5, which is close to i.i.d. resampling. The median-p trend across a 25-fold range of block lengths (0.590 → 0.617) is smaller than the gap between the shortest block and shift (0.590 vs 0.567), and although the rank correlation with block length is +0.808 it rests on four points and is not significant. KS statistics are flat at 0.121–0.145 throughout.
+
+**What survives is the sharper claim.** The invariant difference between the two constructions is not block length but *sampling with replacement*: bootstrap draws a random multiset, so each null path has a different empirical return distribution, while circular shift is a permutation that preserves that distribution exactly and reorders only phase. The extra dispersion this injects into the null Sharpe is block-length-independent — exactly what the table shows.
+
+**Actionable consequence.** If short-range dependence must be preserved in the null, use a **block *permutation*** (shuffle whole blocks without replacement) rather than a block *bootstrap*: it keeps the block structure while leaving the empirical distribution intact. This is a concrete fix the paper can recommend, and it was reachable only because the first hypothesis was tested rather than asserted.
 
 **Recommendation, not yet applied.** `NullMode` should probably default to `shift`. This is deliberately left unchanged for now: every published result in the README was produced under `block`, so flipping the default silently would break their reproducibility. Change it as an explicit, documented migration or not at all.
 
@@ -122,18 +138,18 @@ Sanity check: OOS accuracy is 0.5002 ± 0.0009 in all three arms, confirming the
 
 | Rebalance | Sharpe @ 0 bps | Sharpe @ 5 bps | Turnover/day | Breakeven spread |
 |---|---|---|---|---|
-| Daily | **+1.326** | −0.940 | 1.989 | **2.9 bps** |
-| Monthly | +0.236 | +0.059 | 0.149 | 6.7 bps |
-| Quarterly | +0.201 | +0.142 | 0.051 | 17.1 bps |
+| Daily | **+1.414** | −1.002 | 1.989 | **2.9 bps** |
+| Monthly | +0.252 | +0.063 | 0.149 | 6.7 bps |
+| Quarterly | +0.215 | +0.152 | 0.051 | 17.1 bps |
 | *Equal-weight buy & hold* | *+0.557* | *+0.557* | *0.0002* | *n/a* |
 
-**This table replaces an earlier, incomplete reading of the same experiment, and the correction matters.** The original framing — "IC unchanged while Sharpe flips sign, therefore an implementation defect rather than an absent signal" — is right as far as it goes, but the frictionless column shows that lengthening the holding period does **not** recover the signal. It trades cost for staleness: the frictionless Sharpe collapses from +1.33 to +0.20 as positions go stale, and the quarterly configuration's modest positive is not the daily signal rescued, it is a much weaker strategy that happens to be cheap.
+**This table replaces an earlier, incomplete reading of the same experiment, and the correction matters.** The original framing — "IC unchanged while Sharpe flips sign, therefore an implementation defect rather than an absent signal" — is right as far as it goes, but the frictionless column shows that lengthening the holding period does **not** recover the signal. It trades cost for staleness: the frictionless Sharpe collapses from +1.41 to +0.22 as positions go stale, and the quarterly configuration's modest positive is not the daily signal rescued, it is a much weaker strategy that happens to be cheap.
 
 The sharper statement the data supports:
 
-- The signal is **real and strong at the daily horizon** (frictionless Sharpe +1.33, the highest number produced anywhere in this project) and **decays within days**.
+- The signal is **real and strong at the daily horizon** (frictionless Sharpe +1.41, the highest number produced anywhere in this project) and **decays within days**.
 - It is **untradeable**: breakeven at 2.9 bps is below any realistic ETF spread plus commission.
-- Every configuration that *is* cheap enough to trade (+0.24 monthly, +0.20 quarterly frictionless) **loses to equal-weight buy & hold (+0.557) even at zero cost** — so for those, cost is not what kills them, and a referee cannot dismiss the negative result as an artefact of a pessimistic cost assumption.
+- Every configuration that *is* cheap enough to trade (+0.25 monthly, +0.22 quarterly frictionless) **loses to equal-weight buy & hold (+0.557) even at zero cost** — so for those, cost is not what kills them, and a referee cannot dismiss the negative result as an artefact of a pessimistic cost assumption.
 
 - **Safeguard.** Whenever negative performance accompanies high turnover, sweep frequency *and* report the frictionless column. Reporting only the net Sharpe conflates "no signal" with "signal too expensive to harvest" — opposite diagnoses with opposite remedies.
 
@@ -169,7 +185,22 @@ All three share one structure: a persistent cross-sectional difference unrelated
 - **Result, negative case.** See the §3.4 table: the cheap configurations lose to buy & hold at *zero* cost, which is the strongest form the negative claim can take.
 - **Implementation caution, learned the hard way.** The first version of the impact term omitted the leading size factor, computing `κ·σ·√(turn/q)` instead of `κ·σ·turn·√(turn/q)`. The bug charges impact even when nothing trades and makes unit cost *rise* as turnover falls — it reported 5.64% annual cost and a Sharpe collapse from +0.671 to +0.250 for a strategy turning over 0.6% a day. A cost model must return zero cost for zero turnover; that one-line check catches this whole class of error.
 
-### 3.8 Appendix-level caution: the truncated-proxy trap
+### 3.8 A strong short-horizon signal is a microstructure effect until proven otherwise
+
+- **Mechanism.** Daily cross-sectional signals built from any price-smoothing transform are mechanically related to the most recent return. Bid-ask bounce and stale pricing make yesterday's loser tend to bounce, so *any* feature that loads negatively on the last return inherits a real, statistically enormous, economically untradeable edge. Reporting it as the feature's own discovery is the error.
+- **Experiment.** Three discriminating tests on the +1.414 frictionless daily result from §3.4.
+
+| Test | Result | Reading |
+|---|---|---|
+| IC decay by horizon *h* | h=1: **+0.0319** (t = 8.90); h=2: +0.0127; h=3: +0.0095; h≥5: ≈ 0 | Edge is concentrated in the first day and gone within four |
+| Skip one day (settle t+1→t+2) | Sharpe **+1.414 → +0.555** | Over half the edge lives in the immediately following day |
+| Rank-correlation of score with *yesterday's* return | **−0.594** (t = −213), negative on 98.6% of days | The score *is* a reversal signal |
+
+- **The decisive comparison.** A pure one-day reversal strategy — rank on yesterday's return, no wavelet anywhere — scores **frictionless Sharpe +2.087** against the wavelet's +1.414. The mundane benchmark does not merely match the wavelet, it beats it by nearly 50%: the wavelet is a *lossy proxy* for a signal that is better captured by a minus sign in front of the last return. Both die at 5 bps (−0.851 and −0.626 respectively).
+- **Consequence for the paper.** The most impressive number the project produced is not a wavelet result at all. This closes the last open question in §4 and makes the negative conclusion complete rather than merely unproven: in *four* settings the wavelet lost to the domain's most pedestrian alternative — carry in FX, buy-and-hold in the ETF cross-section, EWMA in the volatility overlay, and now one-day reversal at the daily horizon.
+- **Safeguard.** Before attributing a short-horizon cross-sectional edge to a feature, regress or rank-correlate the score against the trailing one-period return, and benchmark against naive reversal. If the score's correlation with the last return exceeds the feature's own IC by an order of magnitude — as here, 0.594 against 0.032 — the feature is a proxy, not a discovery.
+
+### 3.9 Appendix-level caution: the truncated-proxy trap
 
 Using `1/exposure` as a proxy for the volatility estimate produced "wavelet 0.578 vs EWMA 0.029". Exposure is capped at 1, which flattens all low-volatility information. Comparing the raw σ series directly reversed the conclusion to 0.632 vs 0.670. **Any quantity that has been capped, clipped or smoothed is unfit as a proxy.**
 
@@ -183,7 +214,10 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 |---|---|---|---|---|
 | **G10 FX, directional** | 9 | IC +0.0051 (p = 0.144); adding carry as a feature moved Sharpe from +0.27 to −0.18 | Carry ranking, +0.27 | No incremental value |
 | **ETF cross-section** | 31 | IC +0.0319 (**p = 0.005**); best Sharpe +0.22 but sub-periods +0.43 / −0.60 | 12-1 momentum; equal-weight buy-and-hold +0.56 | Signal real but unstable; loses to passive |
+| **ETF, daily horizon** | 31 | Frictionless Sharpe +1.414; breakeven 2.9 bps | One-day reversal, no wavelet: **+2.087** | Wavelet is a lossy proxy for reversal; both untradeable |
 | **Volatility overlay** | 31 | Sharpe +0.67; σ forecast correlation 0.632, median level 15.2% | EWMA: Sharpe +0.67, correlation **0.670**, median **14.0%** (realised 13.7%) | Overlay works; wavelet contributes nothing |
+
+**Universe-resampling robustness.** Randomly drawn subsets of the 31-ETF universe reproduce the cross-sectional IC: +0.0302 ± 0.0050 at 16 assets and +0.0305 ± 0.0032 at 24, positive in 12/12 draws in both cases, against +0.0319 for the full universe. The IC does not depend on particular members, which answers the "universe selected ex post" objection — though §3.8 shows what that stable IC actually is.
 
 **Power analysis** (supports the "breadth is the bottleneck" claim): a single series requires AR(1) φ ≈ 0.20 for power 0.83, whereas real equities exhibit 0.00–0.05. Raising breadth from 9 to 31 moved the IC from insignificant to significant. This upgrades "we found nothing" from "perhaps they did not look hard enough" to a **bounded statistical statement**.
 
@@ -215,8 +249,8 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 ## 7. Suggested next steps, in priority order
 
 1. ~~Raise the calibration study to 200+ replications.~~ **Done** at n = 250 × 200 (§3.2b).
-2. **Block-length sweep for the block bootstrap**, to test the hypothesised mechanism behind the §3.2b non-uniformity. Cheap, and a referee will ask.
+2. ~~Block-length sweep for the block bootstrap.~~ **Done** (§3.2c): block length refuted as the mechanism; sampling-with-replacement survives. Next step is to implement and re-calibrate a block *permutation* null.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
-4. **Universe-resampling robustness** for the ETF results.
+4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
 5. **Develop the Lean 4 angle** into §3.0 and the abstract — the strongest differentiator available.
-6. **Re-examine the daily-horizon signal.** Frictionless Sharpe +1.33 decaying to +0.20 within a month is the most interesting empirical object the project has produced, and it is currently only one table row. Whether it is a genuine short-horizon effect or a microstructure artefact (bid-ask bounce, stale NAV in country ETFs) is untested and would materially change §4's framing.
+6. ~~Re-examine the daily-horizon signal.~~ **Done** (§3.8): it is short-term reversal, and naive reversal beats the wavelet +2.087 to +1.414. No longer an open question.

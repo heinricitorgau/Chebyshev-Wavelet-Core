@@ -123,7 +123,21 @@ end
 % =========================================================================
 Wz    = W;       Wz(~isfinite(Wz)) = 0;
 Rz    = fwdRet;  Rz(~isfinite(Rz)) = 0;
-valid = any(isfinite(W), 2) & any(isfinite(fwdRet), 2);
+
+% 有效區間 = 首次持倉到最末次持倉之間。回測模組的權重矩陣在暖身期（模型
+% 尚未訓練完成、還沒開始交易）是全零列，若把那些零報酬日算進平均，年化
+% 報酬與年化成本會同時被稀釋，Sharpe 亦被壓低約 sqrt(有效日數/總日數) 倍。
+% 注意不能單純排除「全零列」：策略在有效區間內刻意空手也是一個決策，其
+% 零報酬必須計入，否則等於偷偷剔除表現差的期間。
+held  = any(Wz ~= 0, 2);
+first = find(held, 1);
+last  = find(held, 1, 'last');
+if isempty(first)
+    error('cost_sensitivity:noPosition', 'W 全為零或 NaN，沒有任何持倉可評估。');
+end
+inSpan = false(nObs, 1);
+inSpan(first:last) = true;
+valid  = inSpan & any(isfinite(fwdRet), 2);
 
 grossRet = sum(Wz .* Rz, 2);
 turn     = [sum(abs(Wz(1,:)), 2); sum(abs(diff(Wz, 1, 1)), 2)];
