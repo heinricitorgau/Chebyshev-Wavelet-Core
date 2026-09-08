@@ -52,7 +52,7 @@ Establishes that any empirical failure cannot be attributed to implementation er
 - The differentiation matrix is cross-validated against the integration matrix via the identity $P\,D = I$: max deviation 5.6e-17 on rows $m \le M-2$, and exactly 1.0 on the $m = M-1$ rows where basis truncation is known to bite.
 - The product operational matrix is symmetric to **exactly 0** and matches its defining projection integrals to 5e-15 – 2.3e-14 across four $(k, M)$ configurations.
 - **A verification that had to be discarded, and why it belongs in the paper.** An obvious-looking check — does $\tilde{F}\Psi(t) = f(t)\Psi(t)$ pointwise? — fails with 74% relative error. The check is wrong, not the code: $f\cdot\psi$ has degree up to $2(M-1)$ and cannot lie in an $(M-1)$-degree space, so the POM is only ever the *orthogonal projection* of the product. Confirmed directly: the residual reaches magnitude 65.6, yet its inner product with **every** basis function is 3.5e-15. Asserting a property the object never claimed is the same error class this paper catalogues in the empirical setting, and it is worth one sentence in §3.0 for that reason.
-- **Lean 4 formalisation — current state, stated precisely.** A companion Lean 4 development (`MyMathLib/Wavelet/Defs.lean`, 85 lines) compiles against Mathlib with **no `sorry`**. What it establishes today is the analytic boundary, not the numerical core:
+- **Lean 4 formalisation — current state, stated precisely.** A companion Lean 4 development (`MyMathLib/Wavelet/{Defs,Orthogonality}.lean`) compiles against Mathlib with **no `sorry`**. It now covers the analytic boundary and half of orthogonality, but not the numerical core:
 
 | Formalised | Status |
 |---|---|
