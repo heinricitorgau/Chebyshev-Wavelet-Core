@@ -19,12 +19,18 @@ function results = verify_lean_agreement(opts)
 %         ∫_{-1}^{1} U_m = 2/(m+1)（m 偶）、0（m 奇）。
 %         以自適應數值積分獨立複核。
 %
+%     integral_wavelet_partial
+%         OMI 的 Mblk 區塊：cell 內的部分積分展開到 cell 基底，三個非零項為
+%         psi_{m+1} 的 +1/(2^(J+2)(m+1))、psi_{m-1} 的 -1/(2^(J+2)(m+1))
+%         （m=0 時不存在）、psi_0 的 (-1)^m/(2^(J+1)(m+1))。
+%
 %     withinCellOrthonormal
 %         小波在自身 cell 上正交歸一，即正規化常數 2^(k/2)√(2/π) 確實
 %         使基底歸一。對應 build_chebyshev_matrices 的 orthonormality 檢驗。
 %
-%   尚未涵蓋（Lean 側仍未證）：Mblk 區塊、POM。待其形式化後應在此補上對應
-%   比對，本腳本即為那些檢驗的落腳處。
+%   Mblk 與 Nblk 皆通過，故**整個 OMI 已完成雙軌驗證**。
+%
+%   尚未涵蓋（Lean 側仍未證）：POM。待其形式化後應在此補上對應比對。
 %
 %   ---------------------------------------------------------------------
 %   語法
@@ -40,6 +46,7 @@ function results = verify_lean_agreement(opts)
 %
 %   輸出 results：
 %     .nblkMaxErr        Nblk 公式的最大偏差
+%     .mblkMaxErr        Mblk 公式的最大偏差
 %     .integralMaxErr    ∫U_m 閉式與求積的最大偏差
 %     .orthoMaxErr       正交歸一的最大偏差
 %     .nChecks           實際比對的項數
@@ -63,8 +70,8 @@ arguments
     opts.Verbose (1,1) logical = false
 end
 
-results = struct('nblkMaxErr', 0, 'integralMaxErr', 0, 'orthoMaxErr', 0, ...
-                 'nChecks', 0, 'pass', false);
+results = struct('nblkMaxErr', 0, 'mblkMaxErr', 0, 'integralMaxErr', 0, ...
+                 'orthoMaxErr', 0, 'nChecks', 0, 'pass', false);
 
 fprintf('=================================================================\n');
 fprintf('Lean 形式化 vs MATLAB 實作：閉式結果逐項比對\n');
@@ -114,6 +121,36 @@ end
 fprintf('1. Nblk 區塊係數                最大偏差 %.3e\n', results.nblkMaxErr);
 
 % =====================================================================
+% 1b. integral_wavelet_partial：OMI 的 Mblk 區塊
+% =====================================================================
+% Lean 的恆等式是**函數間的精確等式**；矩陣 Mblk 在 m = M-1 處捨棄 psi_M 項，
+% 這正是 P*D = I 於最末列恰好偏離 1 的原因。故比對時僅檢查矩陣保留的項。
+for k = opts.KRange
+    J = k - 1;
+    for M = opts.MRange
+        P = build_chebyshev_matrices(k, M, false);
+        Mblk = full(P(1:M, 1:M));
+        lean = zeros(M, M);
+        for m = 0:M-1
+            % psi_0 項
+            lean(m+1, 1) = lean(m+1, 1) + (-1)^m / (2^(J+1) * (m+1));
+            % psi_{m+1} 項（超出截斷者由矩陣捨棄）
+            if m + 1 <= M - 1
+                lean(m+1, m+2) = lean(m+1, m+2) + 1 / (2^(J+2) * (m+1));
+            end
+            % psi_{m-1} 項（m = 0 時不存在，waveletPrev 為零函數）
+            if m >= 1
+                lean(m+1, m) = lean(m+1, m) - 1 / (2^(J+2) * (m+1));
+            end
+        end
+        d = max(abs(Mblk - lean), [], 'all');
+        results.mblkMaxErr = max(results.mblkMaxErr, d);
+        results.nChecks = results.nChecks + numel(Mblk);
+    end
+end
+fprintf('1b. Mblk 區塊係數               最大偏差 %.3e\n', results.mblkMaxErr);
+
+% =====================================================================
 % 2. integral_chebyshevU_neg_one_one：∫_{-1}^{1} U_m
 % =====================================================================
 % 以自適應數值積分獨立計算，與 Lean 的閉式比對。
@@ -156,6 +193,7 @@ fprintf('3. 正交歸一（正規化常數）       最大偏差 %.3e\n', result
 % Nblk 與正交歸一要求逐位元／機器精度；求積項另以求積誤差為準。
 quadTol = 1e-12;
 results.pass = (results.nblkMaxErr <= opts.Tol) && ...
+               (results.mblkMaxErr <= opts.Tol) && ...
                (results.orthoMaxErr <= max(opts.Tol, 1e-14)) && ...
                (results.integralMaxErr <= quadTol);
 
