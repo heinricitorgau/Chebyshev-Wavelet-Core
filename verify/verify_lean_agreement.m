@@ -28,9 +28,14 @@ function results = verify_lean_agreement(opts)
 %         小波在自身 cell 上正交歸一，即正規化常數 2^(k/2)√(2/π) 確實
 %         使基底歸一。對應 build_chebyshev_matrices 的 orthonormality 檢驗。
 %
-%   Mblk 與 Nblk 皆通過，故**整個 OMI 已完成雙軌驗證**。
+%     U_mul_U
+%         POM 的線性化 U_l * U_j = sum_{r=0}^{j} U_{l+j-2r}（Z 索引，
+%         U_{-1}=0、U_{-n}=-U_{n-2}，故不需 min 上限）。對應 MATLAB 的
+%         Lambda 張量。僅比對 l+j <= M-1，其餘為 Lambda 已截斷的高階項。
 %
-%   尚未涵蓋（Lean 側仍未證）：POM。待其形式化後應在此補上對應比對。
+%   Nblk、Mblk 與 Lambda 皆通過，故**OMI 與 POM 的核心皆已完成雙軌驗證**。
+%
+%   尚未涵蓋：POM 的投影特徵化（需有限和論證）與 InWeightedL2 可積性。
 %
 %   ---------------------------------------------------------------------
 %   語法
@@ -47,6 +52,7 @@ function results = verify_lean_agreement(opts)
 %   輸出 results：
 %     .nblkMaxErr        Nblk 公式的最大偏差
 %     .mblkMaxErr        Mblk 公式的最大偏差
+%     .lambdaMaxErr      POM 線性化（Lambda 張量）的最大偏差
 %     .integralMaxErr    ∫U_m 閉式與求積的最大偏差
 %     .orthoMaxErr       正交歸一的最大偏差
 %     .nChecks           實際比對的項數
@@ -70,8 +76,8 @@ arguments
     opts.Verbose (1,1) logical = false
 end
 
-results = struct('nblkMaxErr', 0, 'mblkMaxErr', 0, 'integralMaxErr', 0, ...
-                 'orthoMaxErr', 0, 'nChecks', 0, 'pass', false);
+results = struct('nblkMaxErr', 0, 'mblkMaxErr', 0, 'lambdaMaxErr', 0, ...
+                 'integralMaxErr', 0, 'orthoMaxErr', 0, 'nChecks', 0, 'pass', false);
 
 fprintf('=================================================================\n');
 fprintf('Lean 形式化 vs MATLAB 實作：閉式結果逐項比對\n');
@@ -174,6 +180,41 @@ fprintf('2. int_{-1}^{1} U_m 閉式        最大偏差 %.3e （求積誤差量�
     results.integralMaxErr);
 
 % =====================================================================
+% 2b. U_mul_U：POM 的線性化（Lambda 張量）
+% =====================================================================
+% Lean 的和不需 min 上限，因 Z 索引下多出的項會自動抵消（U_{-1}=0、
+% U_{-n}=-U_{n-2}）。此處把那個摺疊展開後與 Lambda 比對。
+for M = opts.MRange
+    [~, ~, info] = build_chebyshev_matrices(2, M, false, ones(2*M, 1));
+    Lam = info.Lambda;
+    for l = 0:M-1
+        for j = 0:M-1
+            if l + j > M - 1
+                continue;               % Lambda 已截斷高階項，無可比對
+            end
+            coef = zeros(1, M);
+            for r = 0:j
+                idx = l + j - 2*r;
+                if idx >= 0
+                    if idx <= M-1
+                        coef(idx+1) = coef(idx+1) + 1;
+                    end
+                elseif idx < -1
+                    back = -idx - 2;    % U_{-n} = -U_{n-2}
+                    if back <= M-1
+                        coef(back+1) = coef(back+1) - 1;
+                    end
+                end                     % idx == -1 時 U_{-1} = 0，無貢獻
+            end
+            d = max(abs(coef - squeeze(Lam(:, j+1, l+1)).'));
+            results.lambdaMaxErr = max(results.lambdaMaxErr, d);
+            results.nChecks = results.nChecks + M;
+        end
+    end
+end
+fprintf('2b. POM 線性化（Lambda）        最大偏差 %.3e\n', results.lambdaMaxErr);
+
+% =====================================================================
 % 3. withinCellOrthonormal：正規化常數確實使基底歸一
 % =====================================================================
 for k = opts.KRange
@@ -194,6 +235,7 @@ fprintf('3. 正交歸一（正規化常數）       最大偏差 %.3e\n', result
 quadTol = 1e-12;
 results.pass = (results.nblkMaxErr <= opts.Tol) && ...
                (results.mblkMaxErr <= opts.Tol) && ...
+               (results.lambdaMaxErr <= opts.Tol) && ...
                (results.orthoMaxErr <= max(opts.Tol, 1e-14)) && ...
                (results.integralMaxErr <= quadTol);
 
