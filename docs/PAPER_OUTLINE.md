@@ -69,15 +69,44 @@ Establishes that any empirical failure cannot be attributed to implementation er
 ### 3.2 Null-test calibration must be verified, not assumed ★ most original section
 
 - **Mechanism.** Null replicates reuse hyperparameters tuned on the true labels, systematically handicapping the null models and making the observed statistic look extreme.
-- **Experiment.** 40 random walks × 150 null draws; the only difference is whether λ is selected.
+
+**(a) The original finding (n = 40).** 40 random walks × 150 null draws; the only difference is whether λ is selected.
 
 | | `P(p<0.05)` accuracy | `P(p<0.05)` Sharpe |
 |---|---|---|
-| Inner-validation λ selection | 0.100 | 0.125 |
+| Inner-validation λ selection, null reuses λ | 0.100 | 0.125 |
 | **Fixed λ** | **0.050** | **0.025** |
 
-- **Key argument.** Sweeping λ over six orders of magnitude moved OOS accuracy by only 0.018 — **selection bought nothing while doubling the test's Type I error rate**.
-- **Safeguard.** Either permute the *entire* procedure including hyperparameter selection, or fix the hyperparameter.
+Sweeping λ over six orders of magnitude moved OOS accuracy by only 0.018 — **selection bought nothing while doubling the test's Type I error rate**. The fix: the null must re-run the *entire* procedure, hyperparameter selection included.
+
+> **Reproducibility note for the manuscript.** The current implementation already re-selects λ inside every null permutation, so the inflated behaviour above **cannot be reproduced from the shipped code**. It must be presented as the historical failure that motivated the fix, not as a property of the released module. A referee who runs the code expecting inflation and does not find it will distrust the whole section.
+
+**(b) High-power verification (n = 250 × 200 null draws).** Binomial SE at α = 0.05 is 0.014; at α = 0.10, 0.019. KS p-values test uniformity of the whole p-distribution, not just its left tail.
+
+| Arm | Statistic | P<.05 | P<.10 | median p | KS | KS p |
+|---|---|---|---|---|---|---|
+| A `NullMode='block'` (module default), fixed λ | accuracy | 0.032 | 0.052 | 0.585 | 0.101 | **0.011** |
+| | Sharpe | 0.044 | 0.088 | 0.597 | 0.106 | **0.007** |
+| B `NullMode='shift'`, fixed λ | accuracy | 0.028 | 0.100 | 0.552 | 0.054 | 0.444 |
+| | Sharpe | 0.076 | 0.112 | 0.555 | 0.066 | 0.215 |
+| C λ selected, null re-selects per draw | accuracy | 0.032 | 0.064 | 0.580 | 0.094 | **0.023** |
+| | Sharpe | 0.052 | 0.088 | 0.580 | 0.117 | **0.002** |
+
+Sanity check: OOS accuracy is 0.5002 ± 0.0009 in all three arms, confirming the data really is signal-free.
+
+**Two conclusions, one of them unwelcome:**
+
+1. **The α = 0.05 claim survives.** Every arm lands within about 2 SE of nominal, including arm C — so the "re-permute the whole procedure" fix genuinely restores left-tail calibration, now verified at n = 250 rather than asserted from n = 40.
+
+2. **A new defect that n = 40 had no power to detect.** The module's *default* null (`block` bootstrap) yields p-values that are **not uniform** (KS p = 0.007–0.011), whereas circular `shift` is clean (KS p = 0.215–0.444). The deviation is a monotone right-shift: the lowest decile is under-populated (0.052–0.088 against an expected 0.100) and the highest over-populated (0.108–0.140), with median p ≈ 0.59 — the observed strategy sits at roughly the 40th percentile of its own null distribution.
+
+**Direction matters, and here it is benign but disqualifying.** A right-shifted p is *conservative*: the test under-rejects, so no false discovery in this repository was manufactured by it. But a null distribution that is not uniform under the null is not a valid reference distribution, and a referee is entitled to say so. Note this is the **opposite direction** from the cross-sectional IC problem in the disclosure below — over-rejection there, under-rejection here. They are two distinct defects and the paper must not conflate them.
+
+**Hypothesised mechanism (stated as untested).** Block bootstrap resamples returns *with replacement*, so each null path has its own realised variance; the observed Sharpe is then compared against nulls whose denominators are drawn from a wider distribution. Circular shift permutes phase only, preserving the return distribution and autocorrelation function exactly. This predicts the defect should scale with block length — a cheap experiment, and one a referee will ask for.
+
+**Recommendation, not yet applied.** `NullMode` should probably default to `shift`. This is deliberately left unchanged for now: every published result in the README was produced under `block`, so flipping the default silently would break their reproducibility. Change it as an explicit, documented migration or not at all.
+
+- **Safeguard.** Verify calibration on signal-free data at n ≥ 200, and test the *whole* p-distribution (KS), not only `P(p<0.05)`. At n = 40 the KS test could not have detected the block-bootstrap defect.
 - **Mandatory disclosure.** The cross-sectional module's IC p-value retains a mildly heavy left tail (`P(p<0.05)` ≈ 0.10 across 80 no-signal panels). Three rounds of investigation, including switching the permutation scheme, did not localise the mechanism. This must appear in the paper; a referee who finds it independently will discount everything else.
 
 ### 3.3 A significant p-value is not profitability: cost-depressed nulls
@@ -89,15 +118,24 @@ Establishes that any empirical failure cannot be attributed to implementation er
 ### 3.4 Decoupling rebalancing frequency from signal quality
 
 - **Mechanism.** IC measures the association between signal and next-period return and is **invariant to implementation frequency**; Sharpe absorbs both signal and friction. Conflating them misreads an implementation defect as an absent signal.
-- **Experiment.** 31-ETF panel; IC constant at +0.0319 throughout.
+- **Experiment.** 31-ETF panel; IC constant at +0.0319 throughout (IC is measured at the daily horizon regardless of holding period, so it *cannot* move with rebalancing frequency).
 
-| Rebalance | Sharpe | Turnover/day | Annual cost |
-|---|---|---|---|
-| Daily | −0.63 | 1.989 | 25.1% |
-| Monthly | +0.10 | 0.149 | 1.9% |
-| Quarterly | +0.16 | 0.051 | 0.6% |
+| Rebalance | Sharpe @ 0 bps | Sharpe @ 5 bps | Turnover/day | Breakeven spread |
+|---|---|---|---|---|
+| Daily | **+1.326** | −0.940 | 1.989 | **2.9 bps** |
+| Monthly | +0.236 | +0.059 | 0.149 | 6.7 bps |
+| Quarterly | +0.201 | +0.142 | 0.051 | 17.1 bps |
+| *Equal-weight buy & hold* | *+0.557* | *+0.557* | *0.0002* | *n/a* |
 
-- **Safeguard.** Whenever negative performance accompanies high turnover, sweep frequency before concluding the signal is void.
+**This table replaces an earlier, incomplete reading of the same experiment, and the correction matters.** The original framing — "IC unchanged while Sharpe flips sign, therefore an implementation defect rather than an absent signal" — is right as far as it goes, but the frictionless column shows that lengthening the holding period does **not** recover the signal. It trades cost for staleness: the frictionless Sharpe collapses from +1.33 to +0.20 as positions go stale, and the quarterly configuration's modest positive is not the daily signal rescued, it is a much weaker strategy that happens to be cheap.
+
+The sharper statement the data supports:
+
+- The signal is **real and strong at the daily horizon** (frictionless Sharpe +1.33, the highest number produced anywhere in this project) and **decays within days**.
+- It is **untradeable**: breakeven at 2.9 bps is below any realistic ETF spread plus commission.
+- Every configuration that *is* cheap enough to trade (+0.24 monthly, +0.20 quarterly frictionless) **loses to equal-weight buy & hold (+0.557) even at zero cost** — so for those, cost is not what kills them, and a referee cannot dismiss the negative result as an artefact of a pessimistic cost assumption.
+
+- **Safeguard.** Whenever negative performance accompanies high turnover, sweep frequency *and* report the frictionless column. Reporting only the net Sharpe conflates "no signal" with "signal too expensive to harvest" — opposite diagnoses with opposite remedies.
 
 ### 3.5 Three data-construction contaminants
 
@@ -115,7 +153,23 @@ All three share one structure: a persistent cross-sectional difference unrelated
 - **Sub-period regime change.** The same configuration: 2001–2013 +0.43, 2014–2026 −0.60. **Full-sample statistics average across regime changes** — the most easily missed failure mode.
 - **Volatility-matched comparison.** Any de-risking lowers drawdown *and* return; an unmatched maxDD comparison is meaningless.
 
-### 3.7 Appendix-level caution: the truncated-proxy trap
+### 3.7 Cost sensitivity: report a frontier and a breakeven, never a single bps figure
+
+- **Mechanism.** A flat "bps × turnover" model understates cost in three ways that all point the same direction: spreads widen exactly when de-risking and momentum strategies trade most; impact grows with order size; and a long-short book pays borrow on the short leg regardless of turnover. A single net Sharpe at one assumed spread is therefore unfalsifiable — the reader cannot tell whether the result survives *their* execution costs.
+- **Implementation.** `backtest/cost_sensitivity.m` layers three switchable terms over the flat model — a volatility-scaled spread `(σ_t/σ_ref)^γ`, an Almgren-form impact `κ·σ_t·turn·√(turn/q)`, and an annual borrow charge on the gross short. With all three off it reduces exactly to the original model, so each refinement's marginal effect is separately auditable. The headline output is the **breakeven spread**, not a point estimate.
+
+**The direction of the adversarial bound is opposite for positive and negative results.** This is the rule most easily got backwards:
+
+| Claim type | Adversarial end of the frontier | Why |
+|---|---|---|
+| **Negative** ("no tradeable signal") | **Zero cost** | If the strategy loses to buy & hold with no friction at all, cost is irrelevant to the conclusion. Piling on cost assumptions is a straw man |
+| **Positive** ("the overlay helps") | **High cost** | Only here does breakeven carry information |
+
+- **Result, positive case.** Volatility targeting turns over 0.0058/day, so spread costs are near-irrelevant: annual cost is 0.09% at 5 bps, and even at 100 bps the Sharpe is +0.540 against +0.557 for unmatched buy & hold. No breakeven inside a 0–100 bps scan. The positive result is robust to the cost model — but see §4: it is EWMA, not the wavelet, that earns it.
+- **Result, negative case.** See the §3.4 table: the cheap configurations lose to buy & hold at *zero* cost, which is the strongest form the negative claim can take.
+- **Implementation caution, learned the hard way.** The first version of the impact term omitted the leading size factor, computing `κ·σ·√(turn/q)` instead of `κ·σ·turn·√(turn/q)`. The bug charges impact even when nothing trades and makes unit cost *rise* as turnover falls — it reported 5.64% annual cost and a Sharpe collapse from +0.671 to +0.250 for a strategy turning over 0.6% a day. A cost model must return zero cost for zero turnover; that one-line check catches this whole class of error.
+
+### 3.8 Appendix-level caution: the truncated-proxy trap
 
 Using `1/exposure` as a proxy for the volatility estimate produced "wavelet 0.578 vs EWMA 0.029". Exposure is capped at 1, which flattens all low-volatility information. Comparing the raw σ series directly reversed the conclusion to 0.632 vs 0.670. **Any quantity that has been capped, clipped or smoothed is unfit as a proxy.**
 
@@ -151,16 +205,18 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 |---|---|
 | **Protocol developed reactively, not pre-registered** | Concede explicitly. Frame as induced from failure cases; propose pre-registered replication as follow-up |
 | **A single feature family cannot generalise** | Title and conclusion already bound the claim; argue portability of the *protocol*, not futility of wavelets |
-| **Calibration study is under-powered** (40–50 replications) | Raise to 200+; a 2σ-level finding will not survive review otherwise |
+| **Calibration study is under-powered** (40–50 replications) | Done: n = 250 × 200 null draws. The α = 0.05 claim held; the higher power also exposed a block-bootstrap non-uniformity that n = 40 could not see (§3.2b) |
 | **Unresolved IC left-tail miscalibration** | Disclose proactively as a limitation, with the exclusion list from the three investigations |
-| **Simplistic cost model** (flat bps, no market impact, no borrow) | Add a cost-sensitivity analysis, or label results as a lower bound on friction |
+| **Simplistic cost model** (flat bps, no market impact, no borrow) | Done: §3.7 reports frontiers and breakevens under a vol-scaled spread, Almgren impact and borrow. The negative results are stated at *zero* cost, so they do not depend on the cost model at all |
 | **ETF universe selected ex post** | Already disclosed; add a robustness check resampling random subsets of the universe |
 
 ---
 
 ## 7. Suggested next steps, in priority order
 
-1. **Raise the calibration study to 200+ replications.** It is the most original section and the most exposed to attack.
-2. **Cost-sensitivity analysis** across a bps grid, reported as a frontier rather than a point estimate.
-3. **Universe-resampling robustness** for the ETF results.
-4. **Develop the Lean 4 angle** into §3.0 and the abstract — the strongest differentiator available.
+1. ~~Raise the calibration study to 200+ replications.~~ **Done** at n = 250 × 200 (§3.2b).
+2. **Block-length sweep for the block bootstrap**, to test the hypothesised mechanism behind the §3.2b non-uniformity. Cheap, and a referee will ask.
+3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
+4. **Universe-resampling robustness** for the ETF results.
+5. **Develop the Lean 4 angle** into §3.0 and the abstract — the strongest differentiator available.
+6. **Re-examine the daily-horizon signal.** Frictionless Sharpe +1.33 decaying to +0.20 within a month is the most interesting empirical object the project has produced, and it is currently only one table row. Whether it is a genuine short-horizon effect or a microstructure artefact (bid-ask bounce, stale NAV in country ETFs) is untested and would materially change §4's framing.

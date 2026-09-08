@@ -132,6 +132,8 @@ function [res, diagOut] = cross_sectional_backtest(F, S, opts)
 %     .meanIC .icStd .icir .icTstat .icHitRate
 %     .lsRet       多空組合報酬（已扣成本），對齊實現時點
 %     .equity      組合淨值曲線
+%     .weights     逐日權重 nObs x nAssets（t 列為賺取 t+1 報酬的部位）
+%     .turnSeries  逐日周轉；.weights 與此二者供 COST_SENSITIVITY 重算成本前緣
 %     .sharpe .maxDD .turnover .nTestDates
 %     .baseline    等權買進持有（市場組合）的對照績效
 %     .null        'NullRuns' > 0 時的虛無分布與 p 值（meanIC 與 sharpe）
@@ -392,6 +394,7 @@ lsRet  = NaN(nObs, 1);
 wPrev  = zeros(1, nAssets);
 turn   = NaN(nObs, 1);
 nSide  = NaN(nObs, 1);
+Wmat   = zeros(nObs, nAssets);           % 逐日權重，供 cost_sensitivity 重算成本前緣
 nRebal = 0;                              % 已處理的交易日計數（決定再平衡時點）
 
 for t = 1:nObs
@@ -425,6 +428,7 @@ for t = 1:nObs
 
     turn(t)  = sum(abs(w - wPrev));
     lsRet(t) = sum(w .* fwdRet(t,:), 'omitnan') - (opts.CostBps/1e4) * turn(t);
+    Wmat(t,:) = w;
     wPrev    = w;
     nSide(t) = nq;
 end
@@ -433,6 +437,8 @@ te = isfinite(lsRet);
 r  = struct();
 r.ic          = ic;
 r.lsRet       = lsRet;
+r.weights     = Wmat;                    % nObs x nAssets，t 列賺 t+1 的報酬
+r.turnSeries  = turn;                    % 逐日周轉（r.turnover 為其平均）
 r.nTestDates  = sum(te);
 r.meanIC      = mean(ic(isfinite(ic)));
 r.icStd       = std(ic(isfinite(ic)));
