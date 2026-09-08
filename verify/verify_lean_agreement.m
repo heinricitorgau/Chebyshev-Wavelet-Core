@@ -35,7 +35,12 @@ function results = verify_lean_agreement(opts)
 %
 %   Nblk、Mblk 與 Lambda 皆通過，故**OMI 與 POM 的核心皆已完成雙軌驗證**。
 %
-%   尚未涵蓋：POM 的投影特徵化（需有限和論證）與 InWeightedL2 可積性。
+%     pomEntry_symm / pom_projection
+%         POM 的對稱性，以及「投影特徵化」：POM 的展開對每個保留的基底函數
+%         psi_c 與 f*psi_b 有相同的加權內積，即殘差正交於保留子空間。對應
+%         build_chebyshev_matrices 的 pomSymmetry 與 pomProjection 檢驗。
+%
+%   至此論文的兩個運算矩陣（OMI 與 POM）核心性質皆已完成雙軌驗證。
 %
 %   ---------------------------------------------------------------------
 %   語法
@@ -55,6 +60,8 @@ function results = verify_lean_agreement(opts)
 %     .lambdaMaxErr      POM 線性化（Lambda 張量）的最大偏差
 %     .integralMaxErr    ∫U_m 閉式與求積的最大偏差
 %     .orthoMaxErr       正交歸一的最大偏差
+%     .pomSymErr         POM 對稱性的最大偏差
+%     .pomProjErr        POM 投影特徵化的最大偏差
 %     .nChecks           實際比對的項數
 %     .pass              是否全數通過
 %
@@ -77,7 +84,8 @@ arguments
 end
 
 results = struct('nblkMaxErr', 0, 'mblkMaxErr', 0, 'lambdaMaxErr', 0, ...
-                 'integralMaxErr', 0, 'orthoMaxErr', 0, 'nChecks', 0, 'pass', false);
+                 'integralMaxErr', 0, 'orthoMaxErr', 0, 'pomSymErr', 0, ...
+                 'pomProjErr', 0, 'nChecks', 0, 'pass', false);
 
 fprintf('=================================================================\n');
 fprintf('Lean 形式化 vs MATLAB 實作：閉式結果逐項比對\n');
@@ -229,6 +237,30 @@ end
 fprintf('3. 正交歸一（正規化常數）       最大偏差 %.3e\n', results.orthoMaxErr);
 
 % =====================================================================
+% 4. pomEntry_symm / pom_projection：POM 的對稱性與投影特徵化
+% =====================================================================
+% 需提供係數向量 C 才會建構 POM（否則 info.verify 的兩欄為 NaN——本專案
+% 初期的驗證即因未傳 C 而從未實際執行過 POM 檢驗）。
+for k = opts.KRange
+    for M = opts.MRange
+        N = 2^(k-1) * M;
+        rng(42);
+        C = randn(N, 1);
+        [~, ~, info] = build_chebyshev_matrices(k, M, false, C, 'Verify', true);
+        if isfield(info.verify, 'pomSymmetry') && isfinite(info.verify.pomSymmetry)
+            results.pomSymErr = max(results.pomSymErr, info.verify.pomSymmetry);
+            results.nChecks = results.nChecks + 1;
+        end
+        if isfield(info.verify, 'pomProjection') && isfinite(info.verify.pomProjection)
+            results.pomProjErr = max(results.pomProjErr, info.verify.pomProjection);
+            results.nChecks = results.nChecks + 1;
+        end
+    end
+end
+fprintf('4a. POM 對稱性                  最大偏差 %.3e\n', results.pomSymErr);
+fprintf('4b. POM 投影特徵化              最大偏差 %.3e\n', results.pomProjErr);
+
+% =====================================================================
 % 判定
 % =====================================================================
 % Nblk 與正交歸一要求逐位元／機器精度；求積項另以求積誤差為準。
@@ -237,7 +269,9 @@ results.pass = (results.nblkMaxErr <= opts.Tol) && ...
                (results.mblkMaxErr <= opts.Tol) && ...
                (results.lambdaMaxErr <= opts.Tol) && ...
                (results.orthoMaxErr <= max(opts.Tol, 1e-14)) && ...
-               (results.integralMaxErr <= quadTol);
+               (results.integralMaxErr <= quadTol) && ...
+               (results.pomSymErr <= max(opts.Tol, 1e-14)) && ...
+               (results.pomProjErr <= 1e-12);
 
 fprintf('-----------------------------------------------------------------\n');
 fprintf('共比對 %d 項。\n', results.nChecks);
