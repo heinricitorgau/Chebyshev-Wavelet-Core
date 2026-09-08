@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "system": {
+    "host": "127.0.0.1",
+    "paper_only": true,
+    "submit_orders": false,
+    "port": 7497,
+    "client_id": 71,
+    "account": null
+  },
+  "trading_rules": {
+    "max_break_even_bps": 2.9,
+    "unit_shares": 1000,
+    "allow_odd_lots": true,
+    "stop_loss_pct": 0.07,
+    "reference_turnover": 1.989,
+    "order_slippage_bps": 2.9
+  },
+  "indicators": {
+    "wavelet_window_size": 63,
+    "wavelet_mode_count": 6,
+    "wavelet_signal_mode": 1,
+    "wavelet_threshold": 0.25,
+    "sma_fast_window": 20,
+    "sma_slow_window": 60,
+    "support_resistance_window": 20
+  },
+  "risk": {
+    "target_annual_volatility": 0.1,
+    "volatility_lookback": 21,
+    "max_leverage": 2.0,
+    "maximum_drawdown": 0.15,
+    "minimum_stop_drawdown": 0.05,
+    "drawdown_recovery_scale": 0.2
+  },
+  "data_store": {
+    "path": "logs/decisions.jsonl",
+    "storage_format": "jsonl"
+  },
+  "orchestration": {
+    "interval_seconds": 300.0,
+    "history_duration": "180 D",
+    "bar_size": "1 day",
+    "use_rth": true,
+    "edge_bps_per_zscore": 2.9
+  }
+}
