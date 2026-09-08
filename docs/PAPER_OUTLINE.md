@@ -63,7 +63,8 @@ Establishes that any empirical failure cannot be attributed to implementation er
 | **`wavelet_orthog_of_cell_ne` — orthogonality across cells** | **Proved** |
 | **`chebyshevU_orthogonality`** — $\int_{-1}^{1} U_i U_j \sqrt{1-x^2}\,dx = \frac{\pi}{2}\delta_{ij}$ | **Proved** (not in Mathlib) |
 | **`withinCellOrthonormal`** — orthonormality on a cell | **Proved** (affine change of variables) |
-| **OMI and POM** | **Still absent from the formalisation** |
+| **OMI `Nblk` block** — `integral_wavelet_cell`, `nblk_coeff` | **Proved, and matches MATLAB to 0.000e+00** |
+| OMI `Mblk` block, POM | Open — `integral_chebyshevU` supplies the analytic input |
 
   Verified by `#print axioms`: every theorem above depends only on `propext`, `Classical.choice` and `Quot.sound` — no `sorryAx`, so nothing is assumed beyond Lean's standard axioms.
 
@@ -79,7 +80,13 @@ Establishes that any empirical failure cannot be attributed to implementation er
 
   The only side condition left for the full basis contract is `InWeightedL2` membership of each basis function — a routine integrability statement, not a mathematical obstacle.
 
-  **Gap 2 remains open**, and it is the one that matters most: the operational matrices are the paper's actual contribution and are still unformalised.
+  **Gap 2 is now partly closed, and this is the first result that does what §3.0 promises.** The OMI splits as $P = I \otimes M_{\text{blk}} + \text{(strict upper triangular)} \otimes N_{\text{blk}}$. The $N_{\text{blk}}$ block records the integral of a wavelet over the *whole* of its cell — the constant that $\int_0^t \psi_{n,m}$ freezes at once $t$ passes cell $n$ — and it is now proved:
+  $$\int_{-1}^{1} U_m = \begin{cases} 2/(m+1) & m \text{ even} \ 0 & m \text{ odd}\end{cases} \quad\Longrightarrow\quad N_{\text{blk}}[m,0] = \frac{1}{2^{J}(m+1)}\ (m \text{ even}),\ 0\ (m \text{ odd}).$$
+  The normalisation cancels, because the constant function on a cell *is* $\psi_{n,0} = \texttt{waveletScale}$, so the stored coefficient is scale-free. That expression is identical to MATLAB's `2^(-k)*2./((0:2:M-1)'+1)` with $k = J+1$.
+
+  **Cross-checked, not merely analogous.** Comparing the Lean-proved formula against the matrix `build_chebyshev_matrices` actually returns, over $k = 1..4$ and $M = 2..6$ — including the requirement that every column of the block after the first vanishes — the **maximum deviation is 0.000e+00**. This is the first point at which the paper can say a piece of the numerical kernel is proved *and* demonstrated to agree with the shipped code, rather than one of the two.
+
+  **Still open:** the $M_{\text{blk}}$ block — the partial integral $\int_{\text{cellLower}}^{t}\psi_{n,m}$ re-expanded in the cell basis. Its analytic input is `integral_chebyshevU`; what it additionally needs is $T_{m+1}$ written back in the $U$ basis. The POM is untouched.
 
   **Framing that is defensible today:** "the wavelet's analytic definitions, support structure and cross-cell orthogonality are machine-checked in Lean 4 against definitions that mirror the numerical implementation; within-cell orthogonality is reduced to a classical relation not yet in Mathlib, and the operational matrices are verified numerically to machine precision with formalisation as future work." The stronger claim — that the negative empirical result cannot stem from a numerical bug — still requires formalising the OMI/POM construction, and must not appear in the abstract until it does.
 
@@ -327,5 +334,5 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 2. ~~Block-length sweep; block-permutation null; splice-count test.~~ **Done** (§3.2c–e). Three hypotheses tested: block length refuted, splice count refuted, sampling-with-replacement confirmed as dominant but incomplete. `blockperm` fixes accuracy calibration and leaves Sharpe marginal across all six block lengths. **Open and to be disclosed as unresolved:** the Sharpe-specific residual. Use `shift`.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
 4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
-5. **Lean 4** (§3.0). Convention gap **closed**; cross-cell orthogonality, `chebyshevU_orthogonality` and `withinCellOrthonormal` all **proved**, so the MATLAB normalisation is machine-verified. **Open, in order:** `InWeightedL2` membership (routine), then the OMI/POM construction — the latter being what the abstract’s strong claim actually needs.
+5. **Lean 4** (§3.0). Convention gap **closed**; cross-cell orthogonality, `chebyshevU_orthogonality` and `withinCellOrthonormal` all **proved**, so the MATLAB normalisation is machine-verified. OMI `Nblk` **proved and cross-checked against MATLAB to 0.000e+00**. **Open, in order:** the OMI `Mblk` block (needs $T_{m+1}$ re-expanded in the $U$ basis), the POM, and `InWeightedL2` membership (routine).
 6. ~~Re-examine the daily-horizon signal.~~ **Done** (§3.8): it is short-term reversal, and naive reversal beats the wavelet +2.087 to +1.414. No longer an open question.
