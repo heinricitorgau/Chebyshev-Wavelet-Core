@@ -56,15 +56,25 @@ Establishes that any empirical failure cannot be attributed to implementation er
 
 | Formalised | Status |
 |---|---|
-| `chebyshevU` recurrence, `cellCoordinate`, `weight`, `wavelet`, weighted inner product | Definitions |
-| `chebyshevU_zero`, `chebyshevU_one`, `chebyshevU_succ_succ` | Proved (definitional, `rfl`) |
-| `weight_nonneg`; `wavelet_zero`; `wavelet_eq_zero_of_not_mem` (support confined to its dyadic cell) | Proved |
-| **Orthonormality, completeness** | **Not proved** — stated as `Prop` contracts (`WeightedOrthonormalBasisContract`, `InWeightedL2`), which the file's own header describes as "intentionally left as interfaces" |
-| **OMI and POM** | **Absent from the formalisation entirely** |
+| `chebyshevU` recurrence, `cellCoordinate`, `cell`, `weight`, `waveletScale`, `wavelet`, `weightedInner` | Definitions, **now matching the MATLAB convention exactly** |
+| `chebyshevU_zero/_one/_succ_succ`; `weight_nonneg`; `waveletScale_pos` | Proved |
+| `cellCoordinate_cellLower/_cellUpper` — the affine map carries each cell onto $[-1,1)$ | Proved |
+| `cell_disjoint`, `support_wavelet_subset`, `wavelet_support_disjoint` | Proved |
+| **`wavelet_orthog_of_cell_ne` — orthogonality across cells** | **Proved** |
+| Orthogonality within a cell | Reduced to `ChebyshevUOrthogonality`, stated as an explicit `Prop` |
+| **OMI and POM** | **Still absent from the formalisation** |
 
-  Two gaps must close before this can carry any weight in a manuscript. First, the operational matrices — the paper's actual contribution and the object §3.0 is about — are not formalised at all, so "the kernel is proof-checked" would be false as stated. Second, the Lean and MATLAB conventions do not yet correspond: Lean uses cells $[n/2^k,\,(n+1)/2^k)$ with a free `scale` parameter, MATLAB uses $[(n-1)/2^{k-1},\,n/2^{k-1})$ with normalisation $2^{k/2}\sqrt{2/\pi}$. A formalisation of a *different* basis proves nothing about this implementation.
+  Verified by `#print axioms`: every theorem above depends only on `propext`, `Classical.choice` and `Quot.sound` — no `sorryAx`, so nothing is assumed beyond Lean's standard axioms.
 
-  **Honest framing available now:** "the wavelet's analytic definitions and support properties are machine-checked in Lean 4; the operational matrices are verified numerically against the source paper to machine precision, and their formalisation is future work." That is defensible and still unusual for the field. The stronger claim — that the negative empirical result cannot stem from a numerical bug because the kernel is proof-checked — requires formalising the OMI/POM construction and proving the two implementations agree. Until then it must not appear in the abstract.
+  **Gap 1 closed.** The Lean definitions previously used cells $[n/2^k,(n+1)/2^k)$ with a free `scale` parameter while MATLAB uses $[(n-1)/2^{k-1},\,n/2^{k-1})$ with normalisation $2^{k/2}\sqrt{2/\pi}$ — a formalisation of a *different* basis, which proves nothing about the implementation. The Lean side now mirrors MATLAB exactly, writing $J = k-1$ and a zero-based cell index only to avoid truncated `ℕ` subtraction in downstream proofs; the dictionary is stated in the file header.
+
+  **Half of orthogonality is now a theorem.** Cross-cell orthogonality is proved unconditionally: distinct dyadic cells are disjoint, so the product of two wavelets vanishes pointwise and the weighted inner product is the integral of zero. Within-cell orthogonality reduces to
+  $$\int_{-1}^{1} U_i(x)\,U_j(x)\sqrt{1-x^2}\,dx = \tfrac{\pi}{2}\,\delta_{ij},$$
+  which is **not in Mathlib** — its `Chebyshev/Orthogonality.lean` covers the *first*-kind polynomials against $1/\sqrt{1-x^2}$. It is stated as a `Prop` rather than a `sorry`, so the outstanding obligation appears in the statement of every result that depends on it. A route exists: `Polynomial.Chebyshev.U_real_cos` gives $U_n(\cos\theta)\sin\theta = \sin((n+1)\theta)$, so $x=\cos\theta$ turns the integral into $\int_0^\pi \sin((i+1)\theta)\sin((j+1)\theta)\,d\theta$; what remains is the change of variables and sine orthogonality.
+
+  **Gap 2 remains open**, and it is the one that matters most: the operational matrices are the paper's actual contribution and are still unformalised.
+
+  **Framing that is defensible today:** "the wavelet's analytic definitions, support structure and cross-cell orthogonality are machine-checked in Lean 4 against definitions that mirror the numerical implementation; within-cell orthogonality is reduced to a classical relation not yet in Mathlib, and the operational matrices are verified numerically to machine precision with formalisation as future work." The stronger claim — that the negative empirical result cannot stem from a numerical bug — still requires formalising the OMI/POM construction, and must not appear in the abstract until it does.
 
 ### 3.1 Look-ahead bias: batch smoothing versus rolling windows
 
@@ -310,5 +320,5 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 2. ~~Block-length sweep; block-permutation null; splice-count test.~~ **Done** (§3.2c–e). Three hypotheses tested: block length refuted, splice count refuted, sampling-with-replacement confirmed as dominant but incomplete. `blockperm` fixes accuracy calibration and leaves Sharpe marginal across all six block lengths. **Open and to be disclosed as unresolved:** the Sharpe-specific residual. Use `shift`.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
 4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
-5. **Lean 4: close the two gaps before claiming anything** (§3.0). Formalise the OMI/POM construction, and reconcile the Lean dyadic-cell convention with the MATLAB one. Until both are done the abstract must use the weaker, accurate framing.
+5. **Lean 4** (§3.0). Convention gap **closed** — Lean now mirrors the MATLAB basis, and cross-cell orthogonality is proved (`#print axioms` clean). **Open, in order:** prove `ChebyshevUOrthogonality` (route via `U_real_cos` and sine orthogonality), then the within-cell change of variables, then the OMI/POM construction — the last being what the abstract’s strong claim actually needs.
 6. ~~Re-examine the daily-horizon signal.~~ **Done** (§3.8): it is short-term reversal, and naive reversal beats the wavelet +2.087 to +1.414. No longer an open question.
