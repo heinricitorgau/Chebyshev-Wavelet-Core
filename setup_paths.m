@@ -2,7 +2,7 @@ function rootDir = setup_paths(varargin)
 %SETUP_PATHS 將本套件的所有子目錄加入 MATLAB 搜尋路徑
 %
 %   本套件的程式碼分置於數個子目錄（core / pipeline / backtest / dataio /
-%   demos），使用前需一次將它們加入搜尋路徑。
+%   demos / verify），使用前需一次將它們加入搜尋路徑。
 %
 %   語法：
 %     setup_paths            將所有子目錄加入路徑（僅本次工作階段有效）
@@ -23,7 +23,7 @@ function rootDir = setup_paths(varargin)
 
 rootDir = fileparts(mfilename('fullpath'));
 
-subDirs = {'core', 'pipeline', 'backtest', 'dataio', 'demos'};
+subDirs = {'core', 'pipeline', 'backtest', 'dataio', 'demos', 'verify'};
 added   = {};
 for i = 1:numel(subDirs)
     d = fullfile(rootDir, subDirs{i});

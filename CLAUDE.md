@@ -20,6 +20,7 @@ backtest/   walkforward_backtest.m      單一序列預測與 walk-forward 回�
 dataio/     load_fx_data.m              ECB 外匯日資料（Frankfurter API）
             load_fx_carry.m             G10 短期利率（FRED）
 demos/      demo_omi_pom.m              十二節示範，產生 README 所有圖檔
+verify/     verify_lean_agreement.m     Lean 已證定理 vs MATLAB 實作的逐項比對
 figures/    README 使用的 PNG（由示範腳本產生，勿手動編輯）
 data/       抓取的資料快取（已 gitignore，不進版控）
 setup_paths.m                           一次加入所有子目錄至搜尋路徑
@@ -77,6 +78,8 @@ grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quanti
 
 **掃描參數後挑最佳值，必須以比較次數修正 p 值。** 曾在 12 個組合（3 特徵集 × 4 再平衡頻率）中選出 Sharpe +0.22、p=0.020；Bonferroni 調整後為約 0.24，不顯著。單一數字看似顯著不代表選擇過程無偏。
 
+**雙軌開發必須有橋接檢驗，不能假設兩軌談的是同一個對象。** Lean 形式化若採用與 MATLAB 不同的 cell 分割或正規化，證得再嚴謹也對這份程式碼毫無保證——本專案初版即如此（Lean 用 `[n/2^k,(n+1)/2^k)` 與自由 scale，MATLAB 用 `[(n-1)/2^(k-1), n/2^(k-1))` 與 `2^(k/2)√(2/π)`）。約定對齊後，須以 `verify/verify_lean_agreement.m` 把 Lean 已證定理的**閉式結果**與 MATLAB 實際建構的矩陣逐項比對。新增任何形式化定理後都應在該腳本補上對應比對。
+
 **效能數字不可在 CPU 競爭下量測。** 本機實測同一運算在不同 MATLAB 行程間可差 6 倍。發布基準前須在機器閒置時量測，並註明量測條件。
 
 **虛無構造建議用 `'shift'`，不要用 `'block'`。** 三者於 200~250 次無訊號重複的 KS 均勻性檢定：`'block'`（現行預設）KS p = 0.002~0.011，明顯不均勻；`'blockperm'`（區塊排列，不放回）accuracy 0.109、Sharpe 0.034，大幅改善但 Sharpe 仍未達標；`'shift'` 0.106~0.361，兩項皆乾淨。機制已定位：自助法取後放回會改變經驗報酬分布（實測平均值偏移 −1.4e-2、標準差 −8.5e-3），排列則恆為 0。殘留偏離的來源**已測過兩個假設、兩個都被否證**：區塊長度（`'block'` 在 5~126 皆滿強度不均勻）與接點數量（`'blockperm'` 掃 5~504，接點由 399 降到 3，KS 僅由 0.125 降到 0.095，且始終達不到 `'shift'` 的 0.085）。殘留偏離**只出現在 Sharpe**，accuracy 在所有 `'blockperm'` 組態下都均勻（KS p = 0.095~0.185），故問題在已實現報酬路徑的尺度而非預測的排序。判定它是真實而非雜訊的依據：六個區塊長度**全部**落在 KS p ≤ 0.052，而 `'shift'` 為 0.106；若真的校準良好，六個獨立組態不該全部指向同一邊。此事目前無解，文件與論文都應照此揭露。預設維持 `'block'` 僅為相容既有已發布結果。
@@ -93,7 +96,7 @@ for f = ["core/build_chebyshev_matrices.m", "core/project_root.m", ...
          "pipeline/wavelet_denoise_series.m", "pipeline/wavelet_features.m", ...
          "backtest/walkforward_backtest.m", "backtest/cross_sectional_backtest.m", ...
          "dataio/load_fx_data.m", "dataio/load_fx_carry.m", ...
-         "demos/demo_omi_pom.m", "setup_paths.m"]
+         "demos/demo_omi_pom.m", "verify/verify_lean_agreement.m", "setup_paths.m"]
     r = checkcode(f);
     fprintf('%-45s %d issues\n', f, numel(r));
 end
@@ -104,6 +107,9 @@ disp(info.verify)
 
 % 因果性：leakTest 必須為 0
 [~,~,~,d] = wavelet_features(S, T, 'Verify', true);
+
+% 雙軌一致性：Lean 已證定理 vs MATLAB 實作（應回報「全數相符」）
+verify_lean_agreement
 ```
 
 ## 已知結果（勿重複驗證）
