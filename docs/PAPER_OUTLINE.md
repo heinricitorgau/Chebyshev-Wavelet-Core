@@ -62,7 +62,7 @@ Establishes that any empirical failure cannot be attributed to implementation er
 | `cell_disjoint`, `support_wavelet_subset`, `wavelet_support_disjoint` | Proved |
 | **`wavelet_orthog_of_cell_ne` — orthogonality across cells** | **Proved** |
 | **`chebyshevU_orthogonality`** — $\int_{-1}^{1} U_i U_j \sqrt{1-x^2}\,dx = \frac{\pi}{2}\delta_{ij}$ | **Proved** (not in Mathlib) |
-| Orthogonality within a cell | Open — needs only the cell-to-$[-1,1]$ change of variables |
+| **`withinCellOrthonormal`** — orthonormality on a cell | **Proved** (affine change of variables) |
 | **OMI and POM** | **Still absent from the formalisation** |
 
   Verified by `#print axioms`: every theorem above depends only on `propext`, `Classical.choice` and `Quot.sound` — no `sorryAx`, so nothing is assumed beyond Lean's standard axioms.
@@ -75,7 +75,9 @@ Establishes that any empirical failure cannot be attributed to implementation er
   $$\int_{-1}^{1} U_i(x)\,U_j(x)\sqrt{1-x^2}\,dx = \tfrac{\pi}{2}\,\delta_{ij}$$
   is **not in Mathlib** — its `Chebyshev/Orthogonality.lean` covers the *first*-kind polynomials against $1/\sqrt{1-x^2}$ — and was previously carried as an open `Prop`. It is now `chebyshevU_orthogonality`, proved by substituting $x=\cos\theta$: the weight becomes $\sin\theta$, each $U_m(\cos\theta)\sin\theta$ becomes $\sin((m+1)\theta)$ via `Polynomial.Chebyshev.U_real_cos`, and the statement collapses to sine orthogonality on $[0,\pi]$ — itself proved here from the product-to-sum identity. The substitution is taken forward through `integral_deriv_smul_comp` rather than routed through `arccos` as Mathlib's first-kind development does, which is shorter and avoids the endpoint side conditions `arccos` carries.
 
-  One step now separates this from a full orthonormal-basis theorem: the change of variables carrying a dyadic cell onto $[-1,1]$, whose Jacobian $2^{J+1}$ cancels against the normalisation $2^{k/2}\sqrt{2/\pi}$.
+  **Both halves are now theorems.** `withinCellOrthonormal` transports the relation from $[-1,1]$ to a dyadic cell by the affine substitution $x = 2^{J+1}t - 2n - 1$, whose Jacobian $2^{J+1}$ cancels exactly against $\texttt{waveletScale}^2 = 2^{J+2}/\pi$, leaving $(2/\pi)\cdot(\pi/2) = 1$ on the diagonal. **This is worth stating plainly: the normalisation constant $2^{k/2}\sqrt{2/\pi}$ that the MATLAB code uses is now machine-verified to be the one that makes the basis orthonormal, rather than taken on the paper's word.**
+
+  The only side condition left for the full basis contract is `InWeightedL2` membership of each basis function — a routine integrability statement, not a mathematical obstacle.
 
   **Gap 2 remains open**, and it is the one that matters most: the operational matrices are the paper's actual contribution and are still unformalised.
 
@@ -325,5 +327,5 @@ Unified narrative: **each application is benchmarked against the most pedestrian
 2. ~~Block-length sweep; block-permutation null; splice-count test.~~ **Done** (§3.2c–e). Three hypotheses tested: block length refuted, splice count refuted, sampling-with-replacement confirmed as dominant but incomplete. `blockperm` fixes accuracy calibration and leaves Sharpe marginal across all six block lengths. **Open and to be disclosed as unresolved:** the Sharpe-specific residual. Use `shift`.
 3. ~~Cost-sensitivity analysis across a bps grid.~~ **Done** — `backtest/cost_sensitivity.m`, results in §3.4 and §3.7.
 4. ~~Universe-resampling robustness for the ETF results.~~ **Done** — IC stable across random subsets (§4).
-5. **Lean 4** (§3.0). Convention gap **closed**; cross-cell orthogonality **proved**; `chebyshevU_orthogonality` **proved** — a second-kind relation Mathlib does not carry. **Open, in order:** the cell-to-$[-1,1]$ change of variables completing `WithinCellOrthonormal`, then the OMI/POM construction, the latter being what the abstract’s strong claim actually needs.
+5. **Lean 4** (§3.0). Convention gap **closed**; cross-cell orthogonality, `chebyshevU_orthogonality` and `withinCellOrthonormal` all **proved**, so the MATLAB normalisation is machine-verified. **Open, in order:** `InWeightedL2` membership (routine), then the OMI/POM construction — the latter being what the abstract’s strong claim actually needs.
 6. ~~Re-examine the daily-horizon signal.~~ **Done** (§3.8): it is short-term reversal, and naive reversal beats the wavelet +2.087 to +1.414. No longer an open question.
