@@ -20,3 +20,15 @@ Desktop.ini
 
 # Fetched market data (not version-controlled)
 data/
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime decision logs written by run_sandbox.py (regenerated on every run)
+logs/
+
+# pytest cache
+.pytest_cache/
