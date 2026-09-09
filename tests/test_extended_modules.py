@@ -31,6 +31,12 @@ from chebyshev_wavelet_py.config_loader import (
 )
 from chebyshev_wavelet_py.data_store import DataStore, DecisionRecord, DecisionStore
 from chebyshev_wavelet_py.execution_guard import PreTradeCostGuard
+from chebyshev_wavelet_py.price_quality import (
+    PriceQualityError,
+    dividend_drag_spread,
+    implied_dividend_yield,
+    require_total_return,
+)
 from chebyshev_wavelet_py.extended_signals import (
     ExtendedSignalAnalyzer,
     FactorSpec,
@@ -791,9 +797,14 @@ class TestSandboxIntegration:
 
 
 class _StubBar:
+    """An IB-shaped bar with a real range, so candle geometry is exercised."""
+
     def __init__(self, date, close: float) -> None:
         self.date = date
-        self.open = self.high = self.low = self.close = close
+        self.open = close * 0.997
+        self.high = close * 1.006
+        self.low = close * 0.992
+        self.close = close
         self.volume = 1_000.0
 
 
@@ -856,18 +867,21 @@ class TestIBDataPath:
                 adapter, ["SPY", "QQQ", "IWM"], "20 D", "1 day", True
             )
 
-        stamps, prices = asyncio.run(scenario())
-        assert prices.shape == (19, 3), "the session absent from IWM must be dropped"
+        stamps, panel = asyncio.run(scenario())
+        assert set(panel) == {"open", "high", "low", "close"}
+        assert panel["close"].shape == (19, 3), "the session absent from IWM must be dropped"
+        assert all(values.shape == (19, 3) for values in panel.values())
+        assert np.all(panel["high"] >= panel["close"]) and np.all(panel["low"] <= panel["close"])
         assert "2026-08-05" not in [str(stamp) for stamp in stamps]
         assert stub.requests == ["SPY", "QQQ", "IWM"]
 
     def test_replay_market_only_exposes_bars_up_to_the_cursor(self) -> None:
         prices = np.arange(60.0, dtype=float).reshape(20, 3) + 100.0
         market = run_sandbox.ReplayMarket(["A", "B", "C"], prices, warmup=10)
-        first = market.advance()
+        first = market.advance()["close"]
         assert first.shape == (11, 3)
         assert np.array_equal(first, prices[:11])
-        second = market.advance()
+        second = market.advance()["close"]
         assert second.shape == (12, 3)
         assert np.array_equal(second[:11], first), "history must not be rewritten"
 
@@ -898,17 +912,17 @@ class TestIBDataPath:
 
         async def scenario():
             await adapter.connect()
-            _, prices = await run_sandbox.fetch_ib_history(
+            _, panel = await run_sandbox.fetch_ib_history(
                 adapter, ["SPY", "QQQ", "IWM"], "20 D", "1 day", True
             )
             await adapter.disconnect()
-            return prices
+            return panel
 
-        prices = asyncio.run(scenario())
+        panel = asyncio.run(scenario())
         assert not adapter.is_connected
 
         config = load_config(REPO_ROOT / "config.json")
-        market = run_sandbox.ReplayMarket(["SPY", "QQQ", "IWM"], prices, warmup=15)
+        market = run_sandbox.ReplayMarket(["SPY", "QQQ", "IWM"], panel, warmup=15)
         store = DataStore(tmp_path / "ib.jsonl")
         state = run_sandbox.SandboxState(
             strategy_equity=[1.0], previous_weights=np.zeros(3), entry_prices={}, held=np.zeros(3)
@@ -930,3 +944,232 @@ class TestIBDataPath:
         assert records, "the loop must persist at least one decision"
         assert all(record["submitted"] is False for record in records)
         assert not [r for r in records if r["total_shares"] > 0 and not r["approved"]]
+
+
+# =====================================================================
+# Trend filter, candle anatomy, dividend adjustment
+# =====================================================================
+
+
+class TestTrendFilter:
+    """A cross against the prevailing long-term trend must not be acted on."""
+
+    @staticmethod
+    def _rise_then_fade() -> np.ndarray:
+        # Rallies, rolls over, then stages a weak bounce: the bounce produces a
+        # golden cross while the slow average is still falling.
+        return np.array(
+            [10.0, 12.0, 15.0, 19.0, 24.0, 30.0, 27.0, 24.0, 21.0, 18.0,
+             16.0, 15.0, 15.5, 16.5, 18.0, 19.0, 19.5, 19.0, 18.0, 17.0]
+        )
+
+    def test_a_golden_cross_against_a_falling_slow_average_is_suppressed(self) -> None:
+        prices = self._rise_then_fade()
+        filtered = ExtendedSignalAnalyzer(3, 8, 4, trend_filter=True).analyze(prices)
+        unfiltered = ExtendedSignalAnalyzer(3, 8, 4, trend_filter=False).analyze(prices)
+
+        # The raw crossing record is a fact and must be identical either way.
+        assert np.array_equal(filtered.golden_cross, unfiltered.golden_cross)
+        assert filtered.suppressed_golden.any(), "this series must contain a suppressed cross"
+
+        index = int(np.flatnonzero(filtered.suppressed_golden[:, 0])[0])
+        assert filtered.golden_cross[index, 0], "suppression applies to a real cross"
+        assert filtered.slow_trend[index, 0] < 0.0, "the slow average was falling"
+        assert not unfiltered.suppressed_golden.any()
+
+        # The filter is scoped to crosses: a breakout on the same bar is
+        # independent evidence and still buys. What must not happen is a buy
+        # whose only support was the suppressed cross.
+        if not filtered.breakout[index, 0]:
+            assert filtered.signal[index, 0] <= 0.0
+
+    def test_a_suppressed_cross_alone_never_buys(self) -> None:
+        """Across a long panel, no bar buys on a suppressed cross by itself."""
+        rng = np.random.default_rng(53)
+        prices = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.012, size=(400, 6)), axis=0))
+        snapshot = ExtendedSignalAnalyzer(5, 20, 10, trend_filter=True).analyze(prices)
+        cross_only = snapshot.suppressed_golden & ~snapshot.breakout
+        assert cross_only.any(), "the panel must contain the case being tested"
+        assert np.all(snapshot.signal[cross_only] <= 0.0)
+
+    def test_slow_trend_uses_only_the_current_and_previous_bar(self) -> None:
+        rng = np.random.default_rng(17)
+        prices = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, size=(80, 2)), axis=0))
+        analyzer = ExtendedSignalAnalyzer(5, 15, 8)
+        split = 50
+        base = analyzer.analyze(prices)
+        shocked = prices.copy()
+        shocked[split:] *= 2.0
+        after = analyzer.analyze(shocked)
+        for field in ("slow_trend", "suppressed_golden", "suppressed_death", "signal"):
+            assert np.array_equal(
+                getattr(base, field)[:split], getattr(after, field)[:split], equal_nan=True
+            ), f"'{field}' leaks future information"
+
+    def test_the_filter_only_ever_removes_signals(self) -> None:
+        rng = np.random.default_rng(23)
+        prices = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.012, size=(300, 5)), axis=0))
+        filtered = ExtendedSignalAnalyzer(5, 20, 10, trend_filter=True).analyze(prices)
+        unfiltered = ExtendedSignalAnalyzer(5, 20, 10, trend_filter=False).analyze(prices)
+        assert np.count_nonzero(filtered.signal) <= np.count_nonzero(unfiltered.signal)
+
+    def test_a_suppressed_cross_is_still_reported_as_a_cross(self) -> None:
+        """Suppression changes the action, not the record of what happened."""
+        prices = self._rise_then_fade()
+        snapshot = ExtendedSignalAnalyzer(3, 8, 4, trend_filter=True).analyze(prices)
+        suppressed = snapshot.suppressed_golden | snapshot.suppressed_death
+        crosses = snapshot.golden_cross | snapshot.death_cross
+        assert np.all(crosses[suppressed])
+
+
+class TestCandleAnatomy:
+    @staticmethod
+    def _bars() -> dict[str, np.ndarray]:
+        # One bar with a long upper shadow, one with a long lower shadow.
+        return {
+            "open": np.array([[100.0], [100.0]]),
+            "high": np.array([[110.0], [102.0]]),
+            "low": np.array([[99.0], [90.0]]),
+            "close": np.array([[101.0], [101.0]]),
+        }
+
+    def test_geometry_matches_hand_calculation(self) -> None:
+        bars = self._bars()
+        snapshot = ExtendedSignalAnalyzer(1, 2, 2).analyze(
+            bars["close"], bars["high"], bars["low"], bars["open"]
+        )
+        candles = snapshot.candles
+        assert candles is not None
+        # Bar 0: range 11, body +1, upper 110 - 101 = 9, lower 100 - 99 = 1
+        assert candles.body[0, 0] == pytest.approx(1.0 / 11.0)
+        assert candles.upper_shadow[0, 0] == pytest.approx(9.0 / 11.0)
+        assert candles.lower_shadow[0, 0] == pytest.approx(1.0 / 11.0)
+        # Bar 1: range 12, upper 102 - 101 = 1, lower 100 - 90 = 10
+        assert candles.lower_shadow[1, 0] == pytest.approx(10.0 / 12.0)
+
+    def test_shadows_are_non_negative_and_parts_sum_to_one(self) -> None:
+        rng = np.random.default_rng(31)
+        closes = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, size=(60, 3)), axis=0))
+        opens = closes * np.exp(rng.normal(0.0, 0.004, size=closes.shape))
+        span = np.abs(rng.normal(0.0, 0.008, size=closes.shape))
+        highs = np.maximum(opens, closes) * (1.0 + span)
+        lows = np.minimum(opens, closes) * (1.0 - span)
+        candles = ExtendedSignalAnalyzer(2, 5, 3).analyze(closes, highs, lows, opens).candles
+        assert candles is not None
+        assert np.all(candles.upper_shadow >= -1e-12)
+        assert np.all(candles.lower_shadow >= -1e-12)
+        total = np.abs(candles.body) + candles.upper_shadow + candles.lower_shadow
+        assert np.allclose(total, 1.0)
+
+    def test_a_zero_range_bar_reports_nan_rather_than_a_fake_doji(self) -> None:
+        flat = np.array([[50.0], [50.0]])
+        candles = ExtendedSignalAnalyzer(1, 2, 2).analyze(flat, flat, flat, flat).candles
+        assert candles is not None
+        assert np.all(np.isnan(candles.body))
+
+    def test_candles_are_absent_when_only_closes_are_supplied(self) -> None:
+        snapshot = ExtendedSignalAnalyzer(1, 2, 2).analyze(np.array([[10.0], [11.0], [12.0]]))
+        assert snapshot.candles is None
+
+    def test_levels_come_from_true_extremes_when_available(self) -> None:
+        """Resistance built from closes sits below the highs it was drawn from."""
+        closes = np.array([[10.0], [11.0], [12.0], [13.0], [12.5]])
+        highs = closes * 1.10
+        lows = closes * 0.90
+        opens = closes.copy()
+        with_extremes = ExtendedSignalAnalyzer(1, 2, 3).analyze(closes, highs, lows, opens)
+        closes_only = ExtendedSignalAnalyzer(1, 2, 3).analyze(closes)
+        assert with_extremes.resistance[4, 0] == pytest.approx(13.0 * 1.10)
+        assert closes_only.resistance[4, 0] == pytest.approx(13.0)
+        assert with_extremes.resistance[4, 0] > closes_only.resistance[4, 0]
+
+    def test_ohlc_support_resistance_stays_causal(self) -> None:
+        rng = np.random.default_rng(41)
+        closes = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, size=(70, 2)), axis=0))
+        highs, lows = closes * 1.01, closes * 0.99
+        analyzer = ExtendedSignalAnalyzer(3, 10, 5)
+        split = 45
+        base = analyzer.analyze(closes, highs, lows, closes)
+        shocked_high = highs.copy()
+        shocked_high[split:] *= 3.0
+        after = analyzer.analyze(closes, shocked_high, lows, closes)
+        assert np.array_equal(
+            base.resistance[:split], after.resistance[:split], equal_nan=True
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"high_prices": np.array([[1.0], [2.0]])},
+            {"high_prices": np.ones((3, 1)), "low_prices": np.ones((2, 1))},
+        ],
+    )
+    def test_inconsistent_ohlc_inputs_are_rejected(self, kwargs: dict) -> None:
+        closes = np.array([[10.0], [11.0]])
+        with pytest.raises(ValueError):
+            ExtendedSignalAnalyzer(1, 2, 2).analyze(closes, **kwargs)
+
+    def test_a_high_below_its_low_is_rejected(self) -> None:
+        closes = np.array([[10.0], [11.0]])
+        with pytest.raises(ValueError, match="high_prices cannot be below"):
+            ExtendedSignalAnalyzer(1, 2, 2).analyze(
+                closes, np.array([[9.0], [9.0]]), np.array([[12.0], [12.0]])
+            )
+
+
+class TestDividendAdjustment:
+    def test_ib_default_trades_setting_is_refused(self) -> None:
+        """IB's TRADES adjusts splits but not distributions."""
+        with pytest.raises(PriceQualityError, match="not dividend-adjusted"):
+            require_total_return("TRADES")
+
+    def test_adjusted_last_is_accepted(self) -> None:
+        assert require_total_return("adjusted_last") == "ADJUSTED_LAST"
+
+    def test_unadjusted_prices_require_an_explicit_decision(self) -> None:
+        assert require_total_return("TRADES", allow_unadjusted=True) == "TRADES"
+
+    def test_an_unknown_setting_is_rejected(self) -> None:
+        with pytest.raises(PriceQualityError, match="unrecognized"):
+            require_total_return("CLOSE_PRICES")
+
+    def test_implied_yield_recovers_a_known_payout(self) -> None:
+        periods = 252
+        unadjusted = np.full((periods + 1, 1), 100.0)
+        # A 4% annual payout compounded back into the adjusted series.
+        adjusted = (100.0 * np.exp(np.linspace(0.0, 0.04, periods + 1))).reshape(-1, 1)
+        recovered = implied_dividend_yield(adjusted, unadjusted, periods_per_year=periods)
+        assert recovered[0] == pytest.approx(0.04, abs=1e-9)
+
+    def test_drag_spread_measures_the_cross_sectional_difference(self) -> None:
+        """A uniform yield cancels in a ranking; the spread is what does not."""
+        periods = 252
+        unadjusted = np.full((periods + 1, 3), 100.0)
+        yields = np.array([0.01, 0.025, 0.042])
+        ramp = np.linspace(0.0, 1.0, periods + 1)[:, None]
+        adjusted = 100.0 * np.exp(ramp * yields[None, :])
+        spread = dividend_drag_spread(adjusted, unadjusted, periods_per_year=periods)
+        assert spread == pytest.approx(0.042 - 0.01, abs=1e-9)
+
+    def test_the_sandbox_config_requests_adjusted_prices(self) -> None:
+        config = load_config(REPO_ROOT / "config.json")
+        assert config.orchestration["what_to_show"] == "ADJUSTED_LAST"
+        assert config.orchestration["allow_unadjusted_prices"] is False
+        assert config.indicators.sma_trend_filter is True
+
+    def test_the_ib_fetch_refuses_unadjusted_prices(self) -> None:
+        """The guard runs before the first request, not after downloading."""
+        from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
+
+        stub = _StubIB(TestIBDataPath._series())
+        adapter = IBPaperAdapter(port=7497, paper_only=True, ib_client=stub)
+
+        async def scenario():
+            await adapter.connect()
+            await run_sandbox.fetch_ib_history(
+                adapter, ["SPY"], "20 D", "1 day", True, what_to_show="TRADES"
+            )
+
+        with pytest.raises(PriceQualityError):
+            asyncio.run(scenario())
+        assert stub.requests == [], "no bars should have been requested"

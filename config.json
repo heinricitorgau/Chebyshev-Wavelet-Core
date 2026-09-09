@@ -23,7 +23,8 @@
     "wavelet_threshold": 0.25,
     "sma_fast_window": 20,
     "sma_slow_window": 60,
-    "support_resistance_window": 20
+    "support_resistance_window": 20,
+    "sma_trend_filter": true
   },
   "risk": {
     "target_annual_volatility": 0.1,
@@ -42,6 +43,8 @@
     "history_duration": "180 D",
     "bar_size": "1 day",
     "use_rth": true,
-    "edge_bps_per_zscore": 2.9
+    "edge_bps_per_zscore": 2.9,
+    "what_to_show": "ADJUSTED_LAST",
+    "allow_unadjusted_prices": false
   }
 }

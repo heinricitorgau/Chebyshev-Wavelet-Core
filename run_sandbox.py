@@ -38,6 +38,7 @@ from chebyshev_wavelet_py.config_loader import ConfigLoader, ConfigurationError,
 from chebyshev_wavelet_py.data_store import DataStore
 from chebyshev_wavelet_py.execution_guard import CostGuardConfig, PreTradeCostGuard
 from chebyshev_wavelet_py.extended_signals import ExtendedSignalAnalyzer
+from chebyshev_wavelet_py.price_quality import PriceQualityError, require_total_return
 from chebyshev_wavelet_py.ib_adapter import (
     IBConnectionError,
     IBDependencyError,
@@ -105,6 +106,11 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ib-duration", default=None, help="IB history duration, e.g. '180 D'.")
     parser.add_argument("--ib-bar-size", default=None, help="IB bar size, e.g. '1 day'.")
     parser.add_argument("--connect-timeout", type=float, default=10.0, help="IB connect timeout.")
+    parser.add_argument(
+        "--what-to-show",
+        default=None,
+        help="IB price type (default ADJUSTED_LAST; TRADES is not dividend-adjusted).",
+    )
     return parser.parse_args(argv)
 
 
@@ -143,16 +149,33 @@ class SyntheticMarket:
         shocks = self._draw(history - 1)
         path = np.vstack([np.zeros((1, len(self.symbols))), np.cumsum(shocks, axis=0)])
         self.prices = opening * np.exp(path)
+        # A separate stream for intraday geometry keeps the close path identical
+        # to earlier runs, so recorded results stay reproducible.
+        self._gap_rng = np.random.default_rng(seed + 1)
 
     def _draw(self, rows: int) -> np.ndarray:
         market = self._rng.normal(0.0, 0.009, size=(rows, 1))
         idiosyncratic = self._rng.normal(0.0, 0.011, size=(rows, len(self.symbols)))
         return market + idiosyncratic
 
-    def advance(self) -> np.ndarray:
-        """Append one new bar and return the complete history."""
+    def advance(self) -> dict[str, np.ndarray]:
+        """Append one new bar and return the complete OHLC history.
+
+        Intraday extremes are synthesised around each close so the candle
+        geometry and the high/low support levels are exercised on this source
+        too, rather than only when a broker is reachable.
+        """
         self.prices = np.vstack([self.prices, self.prices[-1] * np.exp(self._draw(1))[0]])
-        return self.prices
+        return self._panel()
+
+    def _panel(self) -> dict[str, np.ndarray]:
+        closes = self.prices
+        previous = np.vstack([closes[:1], closes[:-1]])
+        opens = previous * np.exp(self._gap_rng.normal(0.0, 0.003, size=closes.shape))
+        span = np.abs(self._gap_rng.normal(0.0, 0.006, size=closes.shape))
+        upper = np.maximum(opens, closes) * (1.0 + span)
+        lower = np.minimum(opens, closes) * (1.0 - span)
+        return {"open": opens, "high": upper, "low": lower, "close": closes}
 
 
 class ReplayMarket:
@@ -163,22 +186,31 @@ class ReplayMarket:
     guarantee the synthetic source provides, applied to recorded history.
     """
 
-    def __init__(self, symbols: Sequence[str], prices: np.ndarray, warmup: int) -> None:
-        if prices.ndim != 2 or prices.shape[0] < warmup + 1:
+    def __init__(
+        self,
+        symbols: Sequence[str],
+        panel: np.ndarray | dict[str, np.ndarray],
+        warmup: int,
+    ) -> None:
+        columns = {"close": panel} if isinstance(panel, np.ndarray) else dict(panel)
+        closes = columns["close"]
+        if closes.ndim != 2 or closes.shape[0] < warmup + 1:
             raise ValueError("replay history is shorter than the requested warm-up")
+        if any(values.shape != closes.shape for values in columns.values()):
+            raise ValueError("every OHLC column must share the close matrix shape")
         self.symbols = tuple(symbols)
-        self._prices = prices
+        self._columns = columns
         self._cursor = warmup
 
     @property
     def remaining(self) -> int:
-        return self._prices.shape[0] - self._cursor
+        return self._columns["close"].shape[0] - self._cursor
 
-    def advance(self) -> np.ndarray:
+    def advance(self) -> dict[str, np.ndarray]:
         if self.remaining <= 0:
             raise IndexError("replay history exhausted")
         self._cursor += 1
-        return self._prices[: self._cursor]
+        return {name: values[: self._cursor] for name, values in self._columns.items()}
 
 
 async def fetch_ib_history(
@@ -187,41 +219,54 @@ async def fetch_ib_history(
     duration: str,
     bar_size: str,
     use_rth: bool,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Download closes for each symbol and align them on shared timestamps.
+    what_to_show: str = "ADJUSTED_LAST",
+    allow_unadjusted: bool = False,
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Download OHLC for each symbol and align them on shared timestamps.
 
     Symbols are intersected on timestamp rather than forward-filled.  Padding a
     missing bar with the previous close would fabricate a price the venue never
     printed and quietly bias every indicator that reads it.
+
+    The price setting is validated before the first request.  IB's default
+    ``TRADES`` adjusts for splits but not distributions, so ranking a panel
+    built from it trades the payout differences between instruments.
     """
     from ib_insync import Stock
 
-    per_symbol: dict[str, dict[Any, float]] = {}
+    setting = require_total_return(what_to_show, allow_unadjusted=allow_unadjusted)
+    fields = ("open", "high", "low", "close")
+    per_symbol: dict[str, dict[Any, tuple[float, ...]]] = {}
     stamps: set[Any] | None = None
     for symbol in symbols:
         bars = await adapter.historical_bars(
             Stock(symbol, "SMART", "USD"),
             duration=duration,
             bar_size=bar_size,
-            what_to_show="TRADES",
+            what_to_show=setting,
             use_rth=use_rth,
         )
+        columns = [getattr(bars, field).tolist() for field in fields]
         mapping = {
-            stamp: float(close)
-            for stamp, close in zip(bars.timestamp.tolist(), bars.close.tolist())
-            if np.isfinite(close) and close > 0.0
+            stamp: values
+            for stamp, values in zip(bars.timestamp.tolist(), zip(*columns))
+            if all(np.isfinite(value) and value > 0.0 for value in values)
         }
-        LOGGER.info("  %-6s %d bars from IB", symbol, len(mapping))
+        LOGGER.info("  %-6s %d bars from IB (%s)", symbol, len(mapping), setting)
         per_symbol[symbol] = mapping
         stamps = set(mapping) if stamps is None else (stamps & set(mapping))
 
     if not stamps:
         raise RuntimeError("IB history has no timestamps common to every symbol")
     ordered = sorted(stamps)
-    matrix = np.array(
-        [[per_symbol[symbol][stamp] for symbol in symbols] for stamp in ordered], dtype=float
-    )
-    return np.asarray(ordered, dtype=object), matrix
+    panel = {
+        field: np.array(
+            [[per_symbol[symbol][stamp][index] for symbol in symbols] for stamp in ordered],
+            dtype=float,
+        )
+        for index, field in enumerate(fields)
+    }
+    return np.asarray(ordered, dtype=object), panel
 
 
 def simple_returns(prices: np.ndarray) -> np.ndarray:
@@ -241,7 +286,8 @@ async def run_cycle(
     state: SandboxState,
 ) -> list[dict[str, Any]]:
     """Run one full decision cycle and persist every instrument's outcome."""
-    prices = market.advance()
+    panel = market.advance()
+    prices = panel["close"]
     latest = prices[-1]
     returns = simple_returns(prices)
     entry_prices = state.entry_prices
@@ -251,7 +297,12 @@ async def run_cycle(
     realized = float(np.nansum(state.previous_weights * latest_asset_returns))
     state.strategy_equity.append(state.strategy_equity[-1] * (1.0 + realized))
 
-    snapshot = analyzer.analyze(prices)
+    snapshot = analyzer.analyze(
+        prices,
+        high_prices=panel.get("high"),
+        low_prices=panel.get("low"),
+        open_prices=panel.get("open"),
+    )
     signals = snapshot.signal[-1]
 
     # A cross or breakout is a momentary event, not a position.  Hold what was
@@ -324,6 +375,10 @@ async def run_cycle(
             "price": round(price, 4),
             "signal": float(signals[index]),
             "desired_position": float(desired[index]),
+            "slow_trend": _finite(float(snapshot.slow_trend[-1, index])),
+            "cross_suppressed_by_trend": bool(
+                snapshot.suppressed_golden[-1, index] or snapshot.suppressed_death[-1, index]
+            ),
             "score": weight,
             "expected_edge_bps": float(expected_edge_bps[index]),
             "required_edge_bps": rules.max_break_even_bps,
@@ -403,6 +458,9 @@ async def async_main(arguments: argparse.Namespace) -> int:
     except IBDependencyError as exc:
         LOGGER.error("IB support unavailable: %s", exc)
         return 2
+    except PriceQualityError as exc:
+        LOGGER.error("price data refused: %s", exc)
+        return 2
     except IBConnectionError as exc:
         LOGGER.error(
             "could not reach IB Paper Trading: %s. Start TWS or IB Gateway, enable "
@@ -420,6 +478,7 @@ async def async_main(arguments: argparse.Namespace) -> int:
         fast_window=indicators.sma_fast_window,
         slow_window=indicators.sma_slow_window,
         support_resistance_window=indicators.support_resistance_window,
+        trend_filter=indicators.sma_trend_filter,
     )
     risk_manager = RiskManager(RiskConfig(**dict(config.risk)))
     cost_guard = PreTradeCostGuard(
@@ -496,6 +555,12 @@ async def _build_ib_market(
     host = arguments.host or config.system.host
     client_id = arguments.client_id if arguments.client_id is not None else config.system.client_id
 
+    # Validate the price setting before opening a socket: a configuration error
+    # should not cost a broker connection to discover.
+    what_to_show = arguments.what_to_show or str(orchestration.get("what_to_show", "ADJUSTED_LAST"))
+    allow_unadjusted = bool(orchestration.get("allow_unadjusted_prices", False))
+    what_to_show = require_total_return(what_to_show, allow_unadjusted=allow_unadjusted)
+
     adapter = IBPaperAdapter(
         host=host,
         port=config.system.port,
@@ -508,11 +573,14 @@ async def _build_ib_market(
     LOGGER.info("connection established; requesting %s of %s bars", duration, bar_size)
 
     try:
-        stamps, prices = await fetch_ib_history(adapter, symbols, duration, bar_size, use_rth)
+        stamps, panel = await fetch_ib_history(
+            adapter, symbols, duration, bar_size, use_rth, what_to_show, allow_unadjusted
+        )
     except Exception:
         await adapter.disconnect()
         raise
 
+    prices = panel["close"]
     warmup = min(arguments.history, max(2, prices.shape[0] - 1))
     available = prices.shape[0] - warmup
     cycles = max(1, min(arguments.cycles, available))
@@ -525,7 +593,7 @@ async def _build_ib_market(
         "aligned %d common bars across %d symbols (%s .. %s)",
         prices.shape[0], len(symbols), stamps[0], stamps[-1],
     )
-    return ReplayMarket(symbols, prices, warmup), adapter, cycles
+    return ReplayMarket(symbols, panel, warmup), adapter, cycles
 
 
 def _finite(value: float) -> float | None:

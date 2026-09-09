@@ -25,6 +25,7 @@ from .live_orchestrator import InstrumentSpec, LiveOrchestrator, OrchestratorCon
 from .config_loader import ConfigLoader, SystemConfig, load_config
 from .data_store import DataStore, DecisionRecord, DecisionStore
 from .extended_signals import (
+    CandleAnatomy,
     ExtendedSignalAnalyzer,
     FactorSpec,
     TechnicalSignalSnapshot,
@@ -32,6 +33,13 @@ from .extended_signals import (
     combine_factors,
     nonlinear_momentum_filter,
     volatility_adjusted_signal,
+)
+from .price_quality import (
+    PriceQualityError,
+    dividend_drag_spread,
+    implied_dividend_yield,
+    is_total_return,
+    require_total_return,
 )
 from .risk_manager import RiskConfig, RiskDecision, RiskManager, SettlementCheck, ShareQuantity
 
@@ -42,7 +50,9 @@ __all__ = [
     "DataStore",
     "DecisionRecord",
     "DecisionStore",
+    "CandleAnatomy",
     "FactorSpec",
+    "PriceQualityError",
     "ExtendedSignalAnalyzer",
     "HistoricalBars",
     "IBPaperAdapter",
@@ -58,6 +68,10 @@ __all__ = [
     "SystemConfig",
     "TechnicalSignalSnapshot",
     "causal_rolling_volatility",
+    "dividend_drag_spread",
+    "implied_dividend_yield",
+    "is_total_return",
+    "require_total_return",
     "combine_factors",
     "PreTradeCostGuard",
     "cell_bounds",

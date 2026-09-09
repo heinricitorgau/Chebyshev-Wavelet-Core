@@ -45,6 +45,7 @@ class IndicatorSettings:
     sma_fast_window: int
     sma_slow_window: int
     support_resistance_window: int
+    sma_trend_filter: bool
 
 
 @dataclass(frozen=True)
@@ -176,3 +177,5 @@ def _validate(config: SystemConfig) -> None:
         raise ConfigurationError("SMA windows must satisfy 1 <= fast < slow")
     if indicators.support_resistance_window < 2:
         raise ConfigurationError("support_resistance_window must be at least two")
+    if not isinstance(indicators.sma_trend_filter, bool):
+        raise ConfigurationError("sma_trend_filter must be a boolean")
