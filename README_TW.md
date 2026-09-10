@@ -32,6 +32,7 @@
 - [真實資料：外匯](#真實資料外匯-load_fx_data)
 - [真實資料：股票／國家 ETF](#真實資料股票國家-etf-load_etf_data)
 - [風險濾網](#風險濾網wavelet_risk_filter)
+- [系統架構](#系統架構)
 - [專案結構](#專案結構)
 - [引用](#引用)
 - [授權](#授權)
@@ -922,6 +923,56 @@ e      = wavelet_risk_filter(S, T, 'Verify', true);   % 因果曝險，值域 [0
 **結論**：波動率目標化是真實且值得保留的降低回撤工具。但 Chebyshev 小波對它沒有任何超越兩行 EWMA 的貢獻。
 
 ---
+
+## 系統架構
+
+本 repository 有兩條相互銜接的路徑：用於建構與評估小波訊號的 MATLAB 研究路徑，以及以因果訊號搭配明確成本與風險閘門的 Python paper-trading 路徑。Python 路徑預設停用下單功能。
+
+```mermaid
+flowchart LR
+  Researcher[研究者 / demo_omi_pom]
+  Sources[(ECB 外匯 / FRED 利差 / Yahoo ETF 資料)]
+
+  subgraph MATLAB[MATLAB 研究路徑]
+    Setup[setup_paths.m]
+    Core[core<br/>OMI / POM 矩陣]
+    IO[dataio<br/>資料載入與快取]
+    Pipeline[pipeline<br/>去噪 / 因果特徵 / 風險濾網]
+    Backtest[backtest<br/>單序列 / 橫斷面回測]
+    Verify[verify<br/>Lean 一致性檢查]
+    Figures[figures<br/>可重現示範輸出]
+  end
+
+  subgraph Python[Python paper-trading 路徑]
+    Config[config.json]
+    Signals[signal_generator<br/>因果小波訊號]
+    Risk[risk_manager<br/>部位與回撤限制]
+    Guard[execution_guard<br/>成本閘門]
+    Orchestrator[live_orchestrator<br/>可稽核決策迴圈]
+    IB[ib_adapter<br/>Interactive Brokers paper API]
+    Log[(logs/decisions.jsonl)]
+  end
+
+  Researcher --> Setup
+  Researcher --> Core
+  Sources --> IO
+  Setup --> Core
+  IO --> Pipeline
+  Core --> Pipeline
+  Pipeline --> Backtest
+  Pipeline --> Risk
+  Backtest --> Verify
+  Backtest --> Figures
+  Config --> Orchestrator
+  Pipeline -. 匯出的特徵 .-> Signals
+  Signals --> Risk
+  Risk --> Guard
+  Guard --> Orchestrator
+  Orchestrator --> IB
+  Orchestrator --> Log
+```
+
+主要依賴方向是 `dataio -> pipeline -> backtest`；`core` 提供 pipeline 使用的數學運算子，而 `verify` 與 `figures` 提供獨立驗證及可重現輸出。Python 層與 MATLAB 回測分離，且下單必須經過成本閘門與 paper-trading adapter。
 
 ## 專案結構
 

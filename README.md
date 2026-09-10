@@ -30,6 +30,7 @@ This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from
 - [Real Data: FX](#real-data-fx-load_fx_data)
 - [Real Data: Equity/Country ETFs](#real-data-equitycountry-etfs-load_etf_data)
 - [Risk Filter](#risk-filter-wavelet_risk_filter)
+- [System Architecture](#system-architecture)
 - [Project Structure](#project-structure)
 - [Citation](#citation)
 - [License](#license)
@@ -920,6 +921,56 @@ The overlay's advantage is concentrated in the crisis-heavy first half. In the c
 **Conclusion**: volatility targeting is a real and useful overlay for reducing drawdown, and it is worth keeping. The Chebyshev wavelet contributes nothing to it beyond what a two-line EWMA already provides.
 
 ---
+
+## System Architecture
+
+The repository has two connected paths: the MATLAB research path for constructing and evaluating wavelet signals, and the Python paper-trading path for applying causal signals with explicit cost and risk gates. The Python path is disabled from submitting orders by default.
+
+```mermaid
+flowchart LR
+  Researcher[Researcher / demo_omi_pom]
+  Sources[(ECB FX / FRED carry / Yahoo ETF data)]
+
+  subgraph MATLAB[MATLAB research path]
+    Setup[setup_paths.m]
+    Core[core<br/>OMI / POM matrices]
+    IO[dataio<br/>load and cache data]
+    Pipeline[pipeline<br/>denoise / causal features / risk filter]
+    Backtest[backtest<br/>walk-forward / cross-sectional]
+    Verify[verify<br/>Lean agreement checks]
+    Figures[figures<br/>reproducible demo output]
+  end
+
+  subgraph Python[Python paper-trading path]
+    Config[config.json]
+    Signals[signal_generator<br/>causal wavelet signals]
+    Risk[risk_manager<br/>position and drawdown limits]
+    Guard[execution_guard<br/>cost gate]
+    Orchestrator[live_orchestrator<br/>auditable decision loop]
+    IB[ib_adapter<br/>Interactive Brokers paper API]
+    Log[(logs/decisions.jsonl)]
+  end
+
+  Researcher --> Setup
+  Researcher --> Core
+  Sources --> IO
+  Setup --> Core
+  IO --> Pipeline
+  Core --> Pipeline
+  Pipeline --> Backtest
+  Pipeline --> Risk
+  Backtest --> Verify
+  Backtest --> Figures
+  Config --> Orchestrator
+  Pipeline -. exported features .-> Signals
+  Signals --> Risk
+  Risk --> Guard
+  Guard --> Orchestrator
+  Orchestrator --> IB
+  Orchestrator --> Log
+```
+
+The main dependency direction is `dataio -> pipeline -> backtest`; `core` supplies the mathematical operators used by the pipeline, while `verify` and `figures` provide independent evidence and reproducible outputs. The Python layer is intentionally separated from MATLAB backtests and keeps order submission behind the cost guard and paper-trading adapter.
 
 ## Project Structure
 
