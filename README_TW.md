@@ -126,6 +126,7 @@ $$
 | 必要工具箱 | 無（純 MATLAB 核心函式） |
 | GPU 加速 | Parallel Computing Toolbox + CUDA 相容顯示卡（**選用**） |
 | 記憶體 | 預設上限 24 GB，適用 32 GB 主機；可由 `'MemoryLimitGB'` 調整 |
+| Python 模擬交易路徑（**選用**） | Python 3.10 以上與 NumPy；`--source ib` 另需 `ib_async`（`pip install ib_async`） |
 
 未安裝 Parallel Computing Toolbox 或無可用 GPU 時，`use_gpu = true` 會發出警告並自動回退至 CPU，不會中斷執行。
 

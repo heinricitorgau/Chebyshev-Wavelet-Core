@@ -6,7 +6,7 @@
 
 以 MATLAB 實作第二類 Chebyshev 小波的積分運算矩陣（OMI）與乘積運算矩陣（POM），依據 Nigam & Alam (2026), *Tamkang J. Math.* 57(3), 171–193，並在其上建構一條完整的金融時間序列研究管線：去噪 → 因果特徵 → 單一序列回測 → 橫斷面回測 → 真實外匯資料 → 利差。
 
-**這是一個研究專案，不是交易系統。** 目前在真實 G10 外匯上的結論是「未找到可交易訊號」，且該結論已寫入文件。不要為了讓數字好看而調參——本專案的價值在於嚴謹的驗證流程，不在於績效。
+**主體是研究專案，不是實盤交易系統。** MATLAB 路徑負責建構與驗證訊號；`chebyshev_wavelet_py/` 與 `run_sandbox.py` 是獨立的 Python 模擬交易決策路徑，僅連接 IB Paper Trading，且沙盒拒絕在 `paper_only` 關閉或 `submit_orders` 開啟時執行。模擬交易基礎設施的存在不代表訊號已可交易：目前在真實 G10 外匯上的結論是「未找到可交易訊號」，且該結論已寫入文件。不要為了讓數字好看而調參——本專案的價值在於嚴謹的驗證流程，不在於績效。
 
 ## 目錄結構
 
@@ -15,15 +15,35 @@ core/       build_chebyshev_matrices.m  論文核心數學（OMI / POM）
             project_root.m              取得套件根目錄（見「路徑規則」）
 pipeline/   wavelet_denoise_series.m    去噪與趨勢特徵（批次、非因果）
             wavelet_features.m          因果特徵萃取（供建模使用）
+            wavelet_risk_filter.m       風險／波動度濾網（曝險控制）
 backtest/   walkforward_backtest.m      單一序列預測與 walk-forward 回測
             cross_sectional_backtest.m  橫斷面多空回測
+            cost_sensitivity.m          交易成本敏感度
+            parameter_sensitivity.m     參數敏感度
+            subperiod_stability.m       子期間穩定性
+            universe_resampling.m       標的池重抽樣
 dataio/     load_fx_data.m              ECB 外匯日資料（Frankfurter API）
             load_fx_carry.m             G10 短期利率（FRED）
+            load_etf_data.m             31 檔國家／產業 ETF（Yahoo）
 demos/      demo_omi_pom.m              十二節示範，產生 README 所有圖檔
 verify/     verify_lean_agreement.m     Lean 已證定理 vs MATLAB 實作的逐項比對
+docs/       PAPER_OUTLINE.md, PAPER_DRAFT.md  方法論論文大綱與草稿
 figures/    README 使用的 PNG（由示範腳本產生，勿手動編輯）
 data/       抓取的資料快取（已 gitignore，不進版控）
 setup_paths.m                           一次加入所有子目錄至搜尋路徑
+
+chebyshev_wavelet_py/                   Python 模擬交易路徑
+            chebyshev_core.py, operators.py        數值核心
+            signal_generator.py, extended_signals.py  因果訊號
+            price_quality.py            價格品質與股息調整防護
+            risk_manager.py             部位與回撤限制
+            execution_guard.py          下單前成本閘門
+            live_orchestrator.py        決策流程編排
+            ib_adapter.py               IB Paper Trading 介面（選用相依 ib_async）
+            config_loader.py, data_store.py  設定與決策紀錄
+run_sandbox.py                          模擬交易決策沙盒（IB 或合成資料）
+config.json                             Python 路徑設定
+tests/      test_extended_modules.py    Python 測試（pytest）
 ```
 
 ## 執行方式
@@ -35,6 +55,15 @@ demo_omi_pom         % 完整示範（約數分鐘）
 ```
 
 示範腳本會自行加入路徑，故 `demo_omi_pom` 也可在未執行 `setup_paths` 時直接呼叫。
+
+Python 路徑：
+
+```bash
+python -m pytest -q
+python run_sandbox.py --cycles 30
+```
+
+`--source ib` 需要 `ib_async`。不要重新改回已停止維護的 `ib_insync`；兩者的 `eventkit`／`aeventkit` 使用相同模組名稱，不宜裝在同一環境。
 
 ## 硬性慣例（違反會破壞既有性質）
 

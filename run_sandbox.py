@@ -232,7 +232,7 @@ async def fetch_ib_history(
     ``TRADES`` adjusts for splits but not distributions, so ranking a panel
     built from it trades the payout differences between instruments.
     """
-    from ib_insync import Stock
+    from ib_async import Stock
 
     setting = require_total_return(what_to_show, allow_unadjusted=allow_unadjusted)
     fields = ("open", "high", "low", "close")

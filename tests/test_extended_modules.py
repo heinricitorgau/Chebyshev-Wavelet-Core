@@ -18,6 +18,7 @@ import math
 import warnings
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -809,7 +810,7 @@ class _StubBar:
 
 
 class _StubIB:
-    """Minimal stand-in for ``ib_insync.IB`` covering the adapter's calls.
+    """Minimal stand-in for ``ib_async.IB`` covering the adapter's calls.
 
     Injecting this exercises contract handling, bar parsing, timestamp
     alignment and the replay walk without a broker.  It does not substitute for
@@ -822,7 +823,7 @@ class _StubIB:
         self._connected = False
         self.requests: list[str] = []
 
-    def isConnected(self) -> bool:  # noqa: N802 - ib_insync's spelling
+    def isConnected(self) -> bool:  # noqa: N802 - ib_async's spelling
         return self._connected
 
     async def connectAsync(self, host, port, clientId):  # noqa: N802, ANN001
@@ -902,6 +903,69 @@ class TestIBDataPath:
 
         with pytest.raises(ValueError, match="Paper Trading port"):
             IBPaperAdapter(port=7496, paper_only=True, ib_client=_StubIB({}))
+
+    def test_adapter_only_calls_methods_the_client_library_has(self) -> None:
+        """Stubs cannot catch a misspelt call, so check the real client class."""
+        ib_async = pytest.importorskip("ib_async")
+
+        for name in (
+            "accountSummaryAsync",
+            "cancelOrder",
+            "cancelRealTimeBars",
+            "connectAsync",
+            "disconnect",
+            "isConnected",
+            "openTrades",
+            "placeOrder",
+            "qualifyContractsAsync",
+            "reqHistoricalDataAsync",
+            "reqPositionsAsync",
+            "reqRealTimeBars",
+        ):
+            assert hasattr(ib_async.IB, name), name
+
+    def test_positions_are_requested_and_filtered_by_account(self) -> None:
+        from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
+
+        class Stub(_StubIB):
+            async def reqPositionsAsync(self):  # noqa: N802
+                return [
+                    SimpleNamespace(account="DU1", contract="SPY", position=3, avgCost=500.0),
+                    SimpleNamespace(account="DU2", contract="QQQ", position=7, avgCost=430.0),
+                ]
+
+        adapter = IBPaperAdapter(port=7497, account="DU1", ib_client=Stub({}))
+
+        async def scenario():
+            await adapter.connect()
+            return await adapter.positions()
+
+        positions = asyncio.run(scenario())
+        assert [(item.contract, item.quantity) for item in positions] == [("SPY", 3.0)]
+
+    @pytest.mark.parametrize("qualified", [[], [None]])
+    def test_an_unqualified_contract_never_reaches_place_order(self, qualified) -> None:
+        """``ib_async`` keeps a ``None`` slot where ``ib_insync`` dropped the entry."""
+        from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
+
+        class Stub(_StubIB):
+            placed = False
+
+            async def qualifyContractsAsync(self, *contracts):  # noqa: N802
+                return qualified
+
+            def placeOrder(self, contract, order):  # noqa: N802
+                Stub.placed = True
+
+        adapter = IBPaperAdapter(port=7497, ib_client=Stub({}))
+
+        async def scenario():
+            await adapter.connect()
+            await adapter.place_limit_order("SPY", "BUY", 1.0, 500.0)
+
+        with pytest.raises(RuntimeError, match="unable to qualify"):
+            asyncio.run(scenario())
+        assert Stub.placed is False
 
     def test_full_decision_loop_over_stubbed_ib_bars(self, tmp_path: Path) -> None:
         """Run the real decision path over IB-shaped bars, end to end."""
