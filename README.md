@@ -1,12 +1,16 @@
-# chebyshev_wavelet_core
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg"><img src="assets/banner.svg" alt="Chebyshev-Wavelet-Core" width="100%"></picture>
+</p>
+
+# Chebyshev-Wavelet-Core
+
+**English** · [繁體中文](README.zh-TW.md)
 
 > High-performance MATLAB implementation of the **Operational Matrix of Integration (OMI)** and **Product Operation Matrix (POM)** for second-kind Chebyshev wavelets, with optional GPU acceleration.
 
 ![MATLAB](https://img.shields.io/badge/MATLAB-R2021a%2B-orange)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![GPU](https://img.shields.io/badge/GPU-gpuArray%20optional-76b900)
-
-**English** | [繁體中文](README_TW.md)
 
 This module generalizes the hand-computed $16\times16$ matrix ($k=3,\ M=4$) from the reference paper into a **fully general implementation for arbitrary resolution $k$ and polynomial order $M$**, verified element-wise against the paper's Eq. (4.9) with zero error.
 
@@ -1013,7 +1017,7 @@ chebyshev_wavelet_core/
 ├── setup_paths.m                    % Adds all subfolders to the MATLAB path
 ├── CLAUDE.md                        % Project guide for Claude Code
 ├── README.md                        % English
-├── README_TW.md                     % Traditional Chinese
+├── README.zh-TW.md                     % Traditional Chinese
 └── LICENSE
 ```
 

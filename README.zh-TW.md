@@ -1,14 +1,16 @@
-# chebyshev_wavelet_core
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg"><img src="assets/banner.svg" alt="Chebyshev-Wavelet-Core" width="100%"></picture>
+</p>
+
+# Chebyshev-Wavelet-Core
+
+[English](README.md) · **繁體中文**
 
 > 第二類 Chebyshev 小波（Second-kind Chebyshev Wavelets）之**積分運算矩陣（OMI）**與**乘積運算矩陣（POM）**的 MATLAB 高效能實作。
->
-> *MATLAB implementation of the operational matrices of integration (OMI) and product operation matrices (POM) for second-kind Chebyshev wavelets, with GPU acceleration.*
 
 ![MATLAB](https://img.shields.io/badge/MATLAB-R2021a%2B-orange)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![GPU](https://img.shields.io/badge/GPU-gpuArray%20optional-76b900)
-
-[English](README.md) | **繁體中文**
 
 本模組將論文中以 $k=3,\ M=4$ 手算列出的 $16\times16$ 矩陣，推廣為**任意解析度 $k$ 與任意多項式階數 $M$ 的通式實作**，並通過與原論文 Eq.(4.9) 的逐項比對（誤差為 0）。
 
@@ -1015,7 +1017,7 @@ chebyshev_wavelet_core/
 ├── setup_paths.m                    % 一次加入所有子目錄至搜尋路徑
 ├── CLAUDE.md                        % 給 Claude Code 的專案指引
 ├── README.md                        % 英文
-├── README_TW.md                     % 繁體中文
+├── README.zh-TW.md                     % 繁體中文
 └── LICENSE
 ```
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-給 Claude Code 的專案指引。人類讀者請看 [README.md](README.md)（英文）或 [README_TW.md](README_TW.md)（繁體中文）。
+給 Claude Code 的專案指引。人類讀者請看 [README.md](README.md)（英文）或 [README.zh-TW.md](README.zh-TW.md)（繁體中文）。
 
 ## 這個專案是什麼
 
@@ -75,7 +75,7 @@ grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quanti
 
 **註解用繁體中文，圖表文字用英文。** MATLAB 預設字型不含 CJK，中文標籤在 `exportgraphics` 匯出的 PNG 中會變成方框，且其他平台未必安裝中文字型。
 
-**兩份 README 必須同步。** `README.md`（英文，主要）與 `README_TW.md`（繁體中文）內容必須一致，含目錄、專案結構、章節表與所有數據表。修改其一必須同步另一份。
+**兩份 README 必須同步。** `README.md`（英文，主要）與 `README.zh-TW.md`（繁體中文）內容必須一致，含目錄、專案結構、章節表與所有數據表。修改其一必須同步另一份。
 
 **所有圖檔必須可由示範腳本重現。** README 寫著「設 `EXPORT_PNG = true` 重跑即可重新產生圖檔」。若新增圖表，其產生程式必須放進 `demos/demo_omi_pom.m`，不可用一次性腳本產生後提交——那會使文件敘述變成假的。
 
