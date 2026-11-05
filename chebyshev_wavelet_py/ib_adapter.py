@@ -1,6 +1,6 @@
 """Async Interactive Brokers adapter for Paper Trading workflows.
 
-``ib_insync`` is intentionally an optional dependency.  The numerical package
+``ib_async`` is intentionally an optional dependency.  The numerical package
 remains NumPy-only until an application constructs :class:`IBPaperAdapter`.
 The adapter defaults to TWS Paper Trading port 7497 and rejects non-paper
 ports unless the caller explicitly opts out of the guard.
@@ -16,8 +16,8 @@ from typing import Any, Callable, Iterable
 import numpy as np
 
 try:
-    from ib_insync import IB, LimitOrder
-except ImportError:  # pragma: no cover - exercised only in deployments without ib_insync.
+    from ib_async import IB, LimitOrder
+except ImportError:  # pragma: no cover - exercised only in deployments without ib_async.
     IB = None
     LimitOrder = None
 
@@ -48,7 +48,7 @@ class HistoricalBars:
 
 @dataclass(frozen=True)
 class PositionSnapshot:
-    """Minimal account position representation independent of ib_insync types."""
+    """Minimal account position representation independent of ib_async types."""
 
     contract: Any
     quantity: float
@@ -70,7 +70,7 @@ class IBPaperAdapter:
     """Small asynchronous facade over IB Gateway/TWS Paper Trading.
 
     The adapter does not manufacture contracts.  Applications should construct
-    and retain explicit ``ib_insync.Contract`` instances so exchange, currency,
+    and retain explicit ``ib_async.Contract`` instances so exchange, currency,
     and primary-exchange decisions remain visible at the call site.
     """
 
@@ -90,7 +90,7 @@ class IBPaperAdapter:
             )
         if ib_client is None and IB is None:
             raise IBDependencyError(
-                "Interactive Brokers support requires the optional 'ib_insync' package."
+                "Interactive Brokers support requires the optional 'ib_async' package."
             )
         self.host = host
         self.port = port
@@ -213,7 +213,7 @@ class IBPaperAdapter:
     async def positions(self) -> list[PositionSnapshot]:
         """Return current positions for the configured account."""
         self._require_connection()
-        positions = await self._ib.positionsAsync(account=self.account or "")
+        positions = await self._ib.reqPositionsAsync()
         return [
             PositionSnapshot(position.contract, float(position.position), float(position.avgCost))
             for position in positions
@@ -250,7 +250,7 @@ class IBPaperAdapter:
         limit_price = reference_price * (multiplier if normalized_side == "BUY" else 2.0 - multiplier)
         async with self._order_lock:
             qualified = await self._ib.qualifyContractsAsync(contract)
-            if not qualified:
+            if not qualified or qualified[0] is None:
                 raise RuntimeError(f"unable to qualify contract for order: {contract}")
             order = LimitOrder(normalized_side, quantity, round(limit_price, 8), tif=tif)
             trade = self._ib.placeOrder(qualified[0], order)

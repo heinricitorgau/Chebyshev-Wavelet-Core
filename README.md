@@ -128,6 +128,7 @@ Since wavelet supports across different subintervals are mutually exclusive, all
 | Required Toolboxes | None (pure MATLAB core functions) |
 | GPU Acceleration | Parallel Computing Toolbox + CUDA-compatible GPU (**optional**) |
 | Memory | Default limit 24 GB, suitable for 32 GB machines; adjustable via `'MemoryLimitGB'` |
+| Python paper-trading path (**optional**) | Python 3.10+ and NumPy; `--source ib` also needs `ib_async` (`pip install ib_async`) |
 
 When the Parallel Computing Toolbox is not installed or no GPU is available, setting `use_gpu = true` will issue a warning and automatically fall back to CPU without interrupting execution.
 
