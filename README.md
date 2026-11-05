@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="Chebyshev-Wavelet-Core" width="100%">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg"><img src="assets/banner.svg" alt="Chebyshev-Wavelet-Core" width="100%"></picture>
 </p>
 
 # chebyshev_wavelet_core
