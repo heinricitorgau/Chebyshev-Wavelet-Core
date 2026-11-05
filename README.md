@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="Chebyshev-Wavelet-Core" width="100%">
+</p>
+
 # chebyshev_wavelet_core
 
 > High-performance MATLAB implementation of the **Operational Matrix of Integration (OMI)** and **Product Operation Matrix (POM)** for second-kind Chebyshev wavelets, with optional GPU acceleration.

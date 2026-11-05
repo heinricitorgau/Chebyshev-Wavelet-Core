@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="Chebyshev-Wavelet-Core" width="100%">
+</p>
+
 # chebyshev_wavelet_core
 
 > 第二類 Chebyshev 小波（Second-kind Chebyshev Wavelets）之**積分運算矩陣（OMI）**與**乘積運算矩陣（POM）**的 MATLAB 高效能實作。
