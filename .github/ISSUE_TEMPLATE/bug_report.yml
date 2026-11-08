@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the MATLAB code or the Python paper-trading path behaves incorrectly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please do **not** report security
+        vulnerabilities here; see [SECURITY.md](https://github.com/heinricitorgau/Chebyshev-Wavelet-Core/blob/main/SECURITY.md) instead.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - core (build_chebyshev_matrices / OMI / POM)
+        - pipeline (denoise / features / risk filter)
+        - backtest (walk-forward / cross-sectional / sensitivity)
+        - dataio (FX / carry / ETF loaders)
+        - demos / figures
+        - verify (Lean agreement)
+        - Python paper-trading path (chebyshev_wavelet_py / run_sandbox.py)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected to happen, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: The smallest MATLAB or Python snippet that reproduces the problem, including any random seed.
+      render: matlab
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error message / output
+      description: Full error text and stack trace, if any.
+      render: text
+  - type: input
+    id: matlab-version
+    attributes:
+      label: MATLAB version
+      placeholder: e.g. R2024b (the project requires R2021a or later)
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version (Python path only)
+      placeholder: e.g. 3.12, with ib_async x.y if using --source ib
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Windows 11, macOS 15, Ubuntu 24.04
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran `setup_paths` (or the demo script) before reproducing.
+        - label: I searched existing issues and this is not a duplicate.

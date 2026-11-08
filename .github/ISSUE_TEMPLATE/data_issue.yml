@@ -1,0 +1,63 @@
+name: Data issue
+description: A data loader returns wrong, missing, or unexpected data from an upstream source
+title: "[Data]: "
+labels: ["data"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when `load_fx_data`, `load_fx_carry`, or `load_etf_data` returns data
+        that does not match the upstream source. Remember that loaders cache to `data/`;
+        please say whether you reproduced with a fresh fetch.
+  - type: dropdown
+    id: source
+    attributes:
+      label: Data source / loader
+      options:
+        - load_fx_data (ECB reference rates via Frankfurter API)
+        - load_fx_carry (G10 short-term rates via FRED)
+        - load_etf_data (country / sector ETFs via Yahoo)
+        - Python path (IB Paper Trading / synthetic data)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: API endpoint
+      description: The exact URL or series ID requested (no API keys or tokens).
+      placeholder: e.g. https://api.frankfurter.dev/v1/..., or FRED series IR3TIB01USM156N
+    validations:
+      required: true
+  - type: textarea
+    id: call
+    attributes:
+      label: Loader call
+      description: The MATLAB call you made, including options such as date range, numeraire, or ReturnType.
+      render: matlab
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected data
+      description: What the upstream source shows (dates, symbols, values), with a link if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual data
+      description: What the loader returned (a few rows, sizes, NaN counts, date gaps).
+    validations:
+      required: true
+  - type: dropdown
+    id: cache
+    attributes:
+      label: Cache state
+      options:
+        - Reproduced after deleting the cache in data/ (fresh fetch)
+        - Only seen with an existing cache
+        - Not sure
+    validations:
+      required: true
