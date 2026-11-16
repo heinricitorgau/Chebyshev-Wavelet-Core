@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it as below, and cite the original
+  paper it implements (listed under references).
+type: software
+title: "Chebyshev-Wavelet-Core: operational matrices of integration and product for second-kind Chebyshev wavelets"
+authors:
+  - family-names: Kao
+    given-names: En-Tsai
+    alias: heinricitorgau
+license: MIT
+repository-code: "https://github.com/heinricitorgau/Chebyshev-Wavelet-Core"
+abstract: >-
+  A MATLAB implementation of the operational matrix of integration (OMI) and
+  the product operation matrix (POM) for second-kind Chebyshev wavelets,
+  derived for arbitrary resolution k and order M, verified element-wise
+  against Eq. (4.9) of Nigam and Alam (Tamkang Journal of Mathematics, 2026)
+  with zero error, and cross-checked against Lean 4 proofs. Includes a case
+  study applying the basis to real FX and ETF data with causal features and
+  calibrated null tests.
+keywords:
+  - Chebyshev wavelets
+  - operational matrix of integration
+  - spectral methods
+  - differential equations
+  - numerical analysis
+  - MATLAB
+  - formal verification
+  - financial time series
+references:
+  - type: article
+    title: "Convergence analysis of an efficient Chebyshev wavelet and its applications to differential equations via operational matrices of integration"
+    authors:
+      - family-names: Nigam
+        given-names: Hare Krishna
+      - family-names: Alam
+        given-names: Md Mahtab
+    journal: Tamkang Journal of Mathematics
+    volume: 57
+    issue: 3
+    start: 171
+    end: 193
+    year: 2026
+    doi: 10.5556/j.tkjm.57.2026.5958

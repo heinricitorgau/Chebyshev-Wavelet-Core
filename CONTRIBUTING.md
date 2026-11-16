@@ -56,7 +56,7 @@ New data sources go in `dataio/` as `load_<source>.m`, following `load_fx_data.m
   ```
 
 - **Comments in Traditional Chinese, figure text in English** (MATLAB's default font has no CJK).
-- **Keep `README.md` and `README.zh-TW.md` in sync**: same sections, tables, and numbers.
+- **Keep every English document in sync with its Chinese twin** (`README.md` / `README.zh-TW.md`, and each `docs/*.md` / `docs/*.zh-TW.md`): same sections, tables, and numbers. Detailed results live in `docs/`; if a changed number also appears in the README's "Results at a glance", update both.
 - **Every figure must be reproducible** from `demos/demo_omi_pom.m`. No one-off plotting scripts.
 - **Causality**: features at time `t` may use only data up to `t`. Run
   `wavelet_features(..., 'Verify', true)`; the leak test must be 0.
