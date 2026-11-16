@@ -13,6 +13,7 @@
 ![Toolboxes](https://img.shields.io/badge/toolboxes-none%20required-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-gpuArray%20optional-76b900)
 ![License](https://img.shields.io/badge/License-MIT-blue)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24285430.svg)](https://doi.org/10.5281/zenodo.24285430)
 [![Paper](https://img.shields.io/badge/DOI-10.5556%2Fj.tkjm.57.2026.5958-orange)](https://doi.org/10.5556/j.tkjm.57.2026.5958)
 
 依據的論文：
@@ -115,7 +116,7 @@ python -m pytest -q
 }
 ```
 
-如果也要引用這份實作，請使用 GitHub 側欄的 **Cite this repository** 按鈕，它讀取的是 [`CITATION.cff`](CITATION.cff)。
+如果也要引用這份實作，請使用 GitHub 側欄的 **Cite this repository** 按鈕，它讀取的是 [`CITATION.cff`](CITATION.cff)。每個版本都會存檔到 Zenodo，[doi:10.5281/zenodo.24285430](https://doi.org/10.5281/zenodo.24285430) 永遠指向最新版。
 
 ## 授權
 
