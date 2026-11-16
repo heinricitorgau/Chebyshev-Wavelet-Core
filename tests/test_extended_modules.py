@@ -13,6 +13,7 @@ the decision log.  Tests that merely re-state an implementation are avoided.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import math
 import warnings
@@ -841,6 +842,16 @@ class _StubIB:
         return [_StubBar(date, close) for date, close in self._series[symbol].items()]
 
 
+#: ``run_sandbox.fetch_ib_history`` imports ``ib_async.Stock`` to build its
+#: requests, so tests that drive it need the optional dependency even though
+#: the IB client itself is stubbed.  Without the mark they fail with
+#: ModuleNotFoundError on a plain ``pip install numpy pytest`` checkout.
+requires_ib_async = pytest.mark.skipif(
+    importlib.util.find_spec("ib_async") is None,
+    reason="optional dependency ib_async is not installed (pip install ib_async)",
+)
+
+
 class TestIBDataPath:
     @staticmethod
     def _series() -> dict[str, dict[str, float]]:
@@ -851,6 +862,7 @@ class TestIBDataPath:
         iwm = {day: 210.0 + index * 0.5 for index, day in enumerate(days) if day != "2026-08-05"}
         return {"SPY": spy, "QQQ": qqq, "IWM": iwm}
 
+    @requires_ib_async
     def test_history_is_intersected_not_forward_filled(self) -> None:
         """A missing session must shrink the panel, never be padded.
 
@@ -967,6 +979,7 @@ class TestIBDataPath:
             asyncio.run(scenario())
         assert Stub.placed is False
 
+    @requires_ib_async
     def test_full_decision_loop_over_stubbed_ib_bars(self, tmp_path: Path) -> None:
         """Run the real decision path over IB-shaped bars, end to end."""
         from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
@@ -1221,6 +1234,7 @@ class TestDividendAdjustment:
         assert config.orchestration["allow_unadjusted_prices"] is False
         assert config.indicators.sma_trend_filter is True
 
+    @requires_ib_async
     def test_the_ib_fetch_refuses_unadjusted_prices(self) -> None:
         """The guard runs before the first request, not after downloading."""
         from chebyshev_wavelet_py.ib_adapter import IBPaperAdapter
