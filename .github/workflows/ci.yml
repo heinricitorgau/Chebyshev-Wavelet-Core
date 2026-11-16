@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  matlab:
+    name: MATLAB ${{ matrix.release }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # R2021a is the oldest release the README promises; latest catches
+        # new checkcode messages and removed functions.
+        release: [R2021a, latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No toolbox dependencies
+        # The README promises "required toolboxes: none". These are the
+        # Statistics Toolbox functions the project re-implements locally.
+        run: |
+          if grep -rnE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quantile|ttest)\s*\(' --include='*.m' .; then
+            echo "::error::Toolbox function call found (see lines above)."
+            exit 1
+          fi
+
+      - uses: matlab-actions/setup-matlab@v2
+        with:
+          release: ${{ matrix.release }}
+
+      - name: checkcode, Eq.(4.9), and Lean agreement
+        uses: matlab-actions/run-command@v2
+        with:
+          command: addpath('verify'); run_ci_checks
+
+  python:
+    name: Python ${{ matrix.python-version }}${{ matrix.ib && ' + ib_async' || '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.10"
+            ib: false
+          - python-version: "3.12"
+            ib: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pytest
+          if [ "${{ matrix.ib }}" = "true" ]; then pip install ib_async; fi
+
+      - name: Test
+        run: python -m pytest -q
