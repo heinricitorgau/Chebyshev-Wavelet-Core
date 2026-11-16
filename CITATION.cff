@@ -8,6 +8,15 @@ authors:
   - family-names: Kao
     given-names: En-Tsai
     alias: heinricitorgau
+version: 1.0.0
+doi: 10.5281/zenodo.24285430
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.24285430
+    description: Zenodo concept DOI (all versions; resolves to the latest)
+  - type: doi
+    value: 10.5281/zenodo.24285431
+    description: Zenodo DOI of version 1.0.0
 license: MIT
 repository-code: "https://github.com/heinricitorgau/Chebyshev-Wavelet-Core"
 abstract: >-

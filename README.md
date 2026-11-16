@@ -13,6 +13,7 @@
 ![Toolboxes](https://img.shields.io/badge/toolboxes-none%20required-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-gpuArray%20optional-76b900)
 ![License](https://img.shields.io/badge/License-MIT-blue)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24285430.svg)](https://doi.org/10.5281/zenodo.24285430)
 [![Paper](https://img.shields.io/badge/DOI-10.5556%2Fj.tkjm.57.2026.5958-orange)](https://doi.org/10.5556/j.tkjm.57.2026.5958)
 
 Based on
@@ -140,7 +141,8 @@ If this module is useful for your research, please cite the original paper:
 ```
 
 To cite this implementation as well, use GitHub's **Cite this repository** button, which reads
-[`CITATION.cff`](CITATION.cff).
+[`CITATION.cff`](CITATION.cff). Every release is archived on Zenodo under
+[doi:10.5281/zenodo.24285430](https://doi.org/10.5281/zenodo.24285430), which always resolves to the latest version.
 
 ## License
 
