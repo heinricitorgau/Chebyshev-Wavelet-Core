@@ -207,7 +207,7 @@ Sanity check: OOS accuracy is 0.5002 ± 0.0009 in all three arms, confirming the
 
 **Recommendation as it stands.** Use `shift` — it is the only construction clean on both statistics. Use `blockperm` when preserving short-range dependence genuinely matters, reporting the residual Sharpe non-uniformity as a limitation. Do not use `block`. The default remains `block` only for backward compatibility with published results, and the module's documentation now says so.
 
-**Recommendation, not yet applied.** `NullMode` should probably default to `shift`. This is deliberately left unchanged for now: every published result in the README was produced under `block`, so flipping the default silently would break their reproducibility. Change it as an explicit, documented migration or not at all.
+**Recommendation, not yet applied.** `NullMode` should probably default to `shift`. This is deliberately left unchanged for now: every published result in the README and `docs/` was produced under `block`, so flipping the default silently would break their reproducibility. Change it as an explicit, documented migration or not at all.
 
 - **Safeguard.** Verify calibration on signal-free data at n ≥ 200, and test the *whole* p-distribution (KS), not only `P(p<0.05)`. At n = 40 the KS test could not have detected the block-bootstrap defect.
 - **Mandatory disclosure.** The cross-sectional module's IC p-value retains a mildly heavy left tail (`P(p<0.05)` ≈ 0.10 across 80 no-signal panels). Three rounds of investigation, including switching the permutation scheme, did not localise the mechanism. This must appear in the paper; a referee who finds it independently will discount everything else.

@@ -2,6 +2,8 @@
 
 給 Claude Code 的專案指引。人類讀者請看 [README.md](README.md)（英文）或 [README.zh-TW.md](README.zh-TW.md)（繁體中文）。
 
+**文件分工**：README 只放精簡首頁（數學為主角、金融為案例研究，各結果附一張圖）。完整內容在 `docs/`：`MATH.md`（理論、驗證、與論文差異、論文範例、限制、效能）、`APPLICATIONS.md`（金融案例研究的所有章節）、`USAGE.md`（需求、安裝、API、架構、專案結構、示範腳本）。每份都有 `.zh-TW.md` 雙胞胎。修改結果數字時，先改 `docs/` 中的對應章節，若該數字也出現在 README 的「結果一覽」，兩處一起改。
+
 ## 這個專案是什麼
 
 以 MATLAB 實作第二類 Chebyshev 小波的積分運算矩陣（OMI）與乘積運算矩陣（POM），依據 Nigam & Alam (2026), *Tamkang J. Math.* 57(3), 171–193，並在其上建構一條完整的金融時間序列研究管線：去噪 → 因果特徵 → 單一序列回測 → 橫斷面回測 → 真實外匯資料 → 利差。
@@ -25,10 +27,12 @@ backtest/   walkforward_backtest.m      單一序列預測與 walk-forward 回�
 dataio/     load_fx_data.m              ECB 外匯日資料（Frankfurter API）
             load_fx_carry.m             G10 短期利率（FRED）
             load_etf_data.m             31 檔國家／產業 ETF（Yahoo）
-demos/      demo_omi_pom.m              十二節示範，產生 README 所有圖檔
+demos/      demo_omi_pom.m              十二節示範，產生 README 與 docs 所有圖檔
 verify/     verify_lean_agreement.m     Lean 已證定理 vs MATLAB 實作的逐項比對
-docs/       PAPER_OUTLINE.md, PAPER_DRAFT.md  方法論論文大綱與草稿
-figures/    README 使用的 PNG（由示範腳本產生，勿手動編輯）
+            run_ci_checks.m             CI 執行的 MATLAB 檢查（checkcode、Eq.(4.9)、Lean 一致性）
+docs/       MATH.md, APPLICATIONS.md, USAGE.md（及 .zh-TW.md）  完整文件
+            PAPER_OUTLINE.md, PAPER_DRAFT.md  方法論論文大綱與草稿
+figures/    README 與 docs 使用的 PNG（由示範腳本產生，勿手動編輯）
 data/       抓取的資料快取（已 gitignore，不進版控）
 setup_paths.m                           一次加入所有子目錄至搜尋路徑
 
@@ -67,7 +71,7 @@ python run_sandbox.py --cycles 30
 
 ## 硬性慣例（違反會破壞既有性質）
 
-**不得引入任何工具箱相依。** README 明確承諾「必要工具箱：無」。`corr`、`tiedrank`、`zscore`、`prctile`、`fitlm`、`glmfit` 等皆屬 Statistics Toolbox，禁止使用——本專案已自行實作 `local_tiedrank`、`local_corr`、ridge 閉式解與 IRLS logistic。新增程式後請執行：
+**不得引入任何工具箱相依。** README 與 `docs/USAGE.md` 明確承諾「必要工具箱：無」（CI 會以 grep 強制檢查）。`corr`、`tiedrank`、`zscore`、`prctile`、`fitlm`、`glmfit` 等皆屬 Statistics Toolbox，禁止使用——本專案已自行實作 `local_tiedrank`、`local_corr`、ridge 閉式解與 IRLS logistic。新增程式後請執行：
 
 ```bash
 grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quantile|ttest)\s*\(' **/*.m
@@ -75,9 +79,9 @@ grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quanti
 
 **註解用繁體中文，圖表文字用英文。** MATLAB 預設字型不含 CJK，中文標籤在 `exportgraphics` 匯出的 PNG 中會變成方框，且其他平台未必安裝中文字型。
 
-**兩份 README 必須同步。** `README.md`（英文，主要）與 `README.zh-TW.md`（繁體中文）內容必須一致，含目錄、專案結構、章節表與所有數據表。修改其一必須同步另一份。
+**中英文件必須同步。** `README.md` 與 `README.zh-TW.md`，以及 `docs/` 下每份文件與其 `.zh-TW.md` 版本，內容必須一致，含目錄、專案結構、章節表與所有數據表。修改其一必須同步另一份。
 
-**所有圖檔必須可由示範腳本重現。** README 寫著「設 `EXPORT_PNG = true` 重跑即可重新產生圖檔」。若新增圖表，其產生程式必須放進 `demos/demo_omi_pom.m`，不可用一次性腳本產生後提交——那會使文件敘述變成假的。
+**所有圖檔必須可由示範腳本重現。** `docs/USAGE.md` 寫著「設 `EXPORT_PNG = true` 重跑即可重新產生圖檔」。若新增圖表，其產生程式必須放進 `demos/demo_omi_pom.m`，不可用一次性腳本產生後提交——那會使文件敘述變成假的。
 
 **路徑規則：一律使用 `project_root()`，不得相對於 `pwd`。** 資料快取與圖檔位置必須與目前工作目錄無關，否則從不同目錄執行會找不到快取或把檔案寫錯地方。
 
@@ -91,7 +95,7 @@ grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quanti
 
 **虛無檢定本身的校準必須驗證，不能假設。** 開發中發現原本以內部驗證選擇 λ 會使 `P(p<0.05)` 由 0.05 膨脹至 0.10~0.125——校準不良的顯著性檢定比沒有檢定更危險。改用固定 λ 後回到名目水準。新增或修改虛無檢定機制時，必須在「無訊號」的合成資料上重跑校準（40~50 次重複），確認 p 值接近均勻分布。
 
-**p 值顯著不等於有獲利。** 當交易成本夠高時，整個虛無分布會被壓成負值；此時觀測值「贏過多數虛無樣本」只代表「賠得比隨機少」。本專案已兩次踩到此陷阱（皆已記錄於 README）。判定訊號時要求 IC 與 Sharpe 的 p 值**同時**顯著。
+**p 值顯著不等於有獲利。** 當交易成本夠高時，整個虛無分布會被壓成負值；此時觀測值「贏過多數虛無樣本」只代表「賠得比隨機少」。本專案已兩次踩到此陷阱（皆已記錄於 `docs/APPLICATIONS.md`）。判定訊號時要求 IC 與 Sharpe 的 p 值**同時**顯著。
 
 **橫斷面模組的 IC p 值左尾偏厚。** 實測 `P(p<0.05)` 約 0.10（名目兩倍，約 2 個標準誤）。三輪調查未找到可修正的機制，故文件建議 IC 的 p 值採用 0.01 門檻。不要把 0.05 附近的結果當成結論。
 
@@ -115,9 +119,11 @@ grep -nE '\b(corr|tiedrank|fitlm|fitclinear|glmfit|nanmean|zscore|prctile|quanti
 
 順帶一個可重複使用的觀察：`'blockperm'` 在 BlockLen=504（n=2000，僅 4 個區塊）時虛無 Sharpe 的相異值恰為 **24 = 4!**，多樣性完全塌陷如預期，但校準並未因此變差（KS 0.095、虛無 sd 0.416 對上其他組態的 ~0.44）。設計此類掃描時應同時記錄虛無統計量的相異值個數，才能分辨「多樣性不足」與「構造有偏」兩種失效。
 
-**虛無檢定的校準要看整個 p 分布，不能只看 `P(p<0.05)`。** 校準研究以 250 次重複 × 200 虛無樣本重跑後，三個對照臂的 `P(p<0.05)` 都落在名目值 ±2 SE 內（SE = 0.014），但 KS 均勻性檢定顯示預設的 `NullMode='block'` 並不均勻（KS p = 0.007~0.011），`'shift'` 才乾淨（0.215~0.444）。偏離方向是單調右移：最低十分位只有 0.052~0.088（期望 0.100），中位數 p ≈ 0.59，即觀測值大約落在自身虛無分布的第 40 百分位——檢定偏保守、會少報而非多報。40 次重複時 KS 完全沒有偵測力，這個缺陷看不出來。推測機制（未驗證）：區塊自助法為取後放回，每條虛無路徑有各自的已實現變異，Sharpe 的分母分布因此變寬；循環位移只改相位，完整保留報酬分布與自我相關。**注意這與橫斷面 IC 左尾偏厚是相反方向的兩個獨立缺陷，勿混為一談。** 目前刻意不改預設值：README 所有已發布結果都是在 `block` 下產生的，靜默翻轉會破壞其可重現性。
+**虛無檢定的校準要看整個 p 分布，不能只看 `P(p<0.05)`。** 校準研究以 250 次重複 × 200 虛無樣本重跑後，三個對照臂的 `P(p<0.05)` 都落在名目值 ±2 SE 內（SE = 0.014），但 KS 均勻性檢定顯示預設的 `NullMode='block'` 並不均勻（KS p = 0.007~0.011），`'shift'` 才乾淨（0.215~0.444）。偏離方向是單調右移：最低十分位只有 0.052~0.088（期望 0.100），中位數 p ≈ 0.59，即觀測值大約落在自身虛無分布的第 40 百分位——檢定偏保守、會少報而非多報。40 次重複時 KS 完全沒有偵測力，這個缺陷看不出來。推測機制（未驗證）：區塊自助法為取後放回，每條虛無路徑有各自的已實現變異，Sharpe 的分母分布因此變寬；循環位移只改相位，完整保留報酬分布與自我相關。**注意這與橫斷面 IC 左尾偏厚是相反方向的兩個獨立缺陷，勿混為一談。** 目前刻意不改預設值：`docs/APPLICATIONS.md` 所有已發布結果都是在 `block` 下產生的，靜默翻轉會破壞其可重現性。
 
 ## 驗證方式
+
+CI（`.github/workflows/ci.yml`）在 MATLAB R2021a 與最新版上執行 `verify/run_ci_checks.m`（checkcode 全檔、Eq.(4.9) 誤差 0、`verify_lean_agreement` 全數相符），並以 grep 強制「無工具箱相依」；Python 則在 3.10（無 `ib_async`，IB 測試跳過）與 3.12（含 `ib_async`）跑 pytest。本機可直接呼叫 `run_ci_checks` 重現 CI 的 MATLAB 部分。
 
 ```matlab
 % 全部檔案的靜態檢查（應全部 clean）
@@ -143,7 +149,7 @@ verify_lean_agreement
 
 ## 已知結果（勿重複驗證）
 
-- **核心數學正確**：與論文 Eq.(4.9) 逐項誤差 0；論文的通式 Eqs.(4.11)/(4.12) 有排版錯誤，本實作採與 Eq.(4.9) 一致的版本（已記錄於 README）。
+- **核心數學正確**：與論文 Eq.(4.9) 逐項誤差 0；論文的通式 Eqs.(4.11)/(4.12) 有排版錯誤，本實作採與 Eq.(4.9) 一致的版本（已記錄於 `docs/MATH.md`）。
 - **偵測力上限**：單一序列在 n=2500 下需 AR(1) φ ≈ 0.20 才偵測得到，真實股票僅 0.00~0.05。瓶頸是標的廣度，非參數。
 - **真實 G10 外匯**：純即期與總報酬皆未找到可交易訊號。加入 carry 為特徵後，小波特徵反而使 Sharpe 由 +0.27 降至 −0.18（周轉上升 123 倍）。純 carry 策略 Sharpe 0.27、最大回撤 30.4%、復原耗時 4 年，不符合穩定投資的標準。
 - **31 檔國家／產業 ETF**：廣度由 9 提高至 31 後，小波的橫斷面 IC 由 +0.0051（p=0.144）提升至 +0.0319（p=0.005），訊號在統計上確實存在。但子期間拆解顯示 2001–2013 為 +0.43、2014–2026 為 −0.60（動能+小波，每月再平衡），屬於「曾經有效後失效」而非穩定策略；且等權買進持有為 +0.56，優於任何策略組合。橫斷面動能於 2009 年後衰減在文獻上有記載。

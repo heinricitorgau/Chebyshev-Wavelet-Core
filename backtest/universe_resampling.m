@@ -33,7 +33,7 @@ end
 
 opts = localOptions(varargin{:});
 previousRng = rng;
-restoreRng = onCleanup(@() rng(previousRng)); %#ok<NASGU>
+restoreRng = onCleanup(@() rng(previousRng));
 rng(opts.Seed, 'twister');
 
 subsetSizes = subsetSizes(:);
