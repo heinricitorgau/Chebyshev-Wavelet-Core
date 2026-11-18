@@ -1218,6 +1218,14 @@ class TestDividendAdjustment:
         recovered = implied_dividend_yield(adjusted, unadjusted, periods_per_year=periods)
         assert recovered[0] == pytest.approx(0.04, abs=1e-9)
 
+    @pytest.mark.parametrize("periods_per_year", [0, -252])
+    def test_a_non_positive_annualization_is_rejected(self, periods_per_year: int) -> None:
+        """Zero used to escape as ZeroDivisionError; a negative value as a
+        misleading "too large" message."""
+        prices = np.full((10, 2), 100.0)
+        with pytest.raises(PriceQualityError, match="periods_per_year must be positive"):
+            implied_dividend_yield(prices, prices, periods_per_year=periods_per_year)
+
     def test_drag_spread_measures_the_cross_sectional_difference(self) -> None:
         """A uniform yield cancels in a ranking; the spread is what does not."""
         periods = 252

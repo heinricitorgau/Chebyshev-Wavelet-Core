@@ -76,6 +76,8 @@ def implied_dividend_yield(
     instrument; the spread across that vector is the size of the false ranking
     signal an unadjusted panel would carry.
     """
+    if periods_per_year <= 0:
+        raise PriceQualityError("periods_per_year must be positive")
     adjusted = np.asarray(adjusted_prices, dtype=float)
     unadjusted = np.asarray(unadjusted_prices, dtype=float)
     if adjusted.ndim == 1:
@@ -89,10 +91,7 @@ def implied_dividend_yield(
     if np.any(adjusted <= 0.0) or np.any(unadjusted <= 0.0):
         raise PriceQualityError("prices must be strictly positive")
 
-    periods = adjusted.shape[0] - 1
-    years = periods / float(periods_per_year)
-    if years <= 0.0:
-        raise PriceQualityError("periods_per_year is too large for this sample")
+    years = (adjusted.shape[0] - 1) / float(periods_per_year)
     adjusted_growth = np.log(adjusted[-1] / adjusted[0])
     unadjusted_growth = np.log(unadjusted[-1] / unadjusted[0])
     return (adjusted_growth - unadjusted_growth) / years
